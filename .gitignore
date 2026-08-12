@@ -1,0 +1,20 @@
+# Simulation outputs
+simv
+simv.daidir/
+csrc/
+*.vcd
+*.fsdb
+*.fst
+*.log
+
+# FPGA/EDA generated files
+.Xil/
+*.jou
+*.wdb
+*.str
+
+# Editor and OS files
+*.swp
+*~
+Thumbs.db
+.DS_Store
