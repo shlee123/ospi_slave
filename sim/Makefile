@@ -1,16 +1,21 @@
 SIM ?= iverilog
-TOP ?= tb_async_fifo
+RTL := ../rtl/async_fifo.v ../rtl/ospi_slave.v
 
-RTL := ../rtl/async_fifo.v
-TB  := tb_async_fifo.v
+.PHONY: all run-ospi run-fifo syntax clean
 
-.PHONY: all run clean
+all: run-fifo run-ospi
 
-all: run
+syntax:
+	$(SIM) -g2005 -s ospi_slave -o ospi_syntax $(RTL)
 
-run:
-	$(SIM) -g2005 -s $(TOP) -o simv $(RTL) $(TB)
-	vvp simv
+run-fifo:
+	$(SIM) -g2005 -s tb_async_fifo -o simv_fifo \
+		../rtl/async_fifo.v tb_async_fifo.v
+	vvp simv_fifo
+
+run-ospi:
+	$(SIM) -g2005 -s tb_ospi_slave -o simv_ospi $(RTL) tb_ospi_slave.v
+	vvp simv_ospi
 
 clean:
-	rm -f simv *.vcd *.fst *.fsdb *.log
+	rm -f simv simv_fifo simv_ospi ospi_syntax *.vcd *.fst *.fsdb *.log
