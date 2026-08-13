@@ -57,9 +57,15 @@ module async_fifo #(
 
     // A full FIFO is detected by comparing the next write Gray pointer with
     // the synchronized read Gray pointer after inverting its two MSBs.
-    assign rd_gray_full_compare =
-        {~rd_gray_sync2[PTR_WIDTH-1:PTR_WIDTH-2],
-          rd_gray_sync2[PTR_WIDTH-3:0]};
+    generate
+        if (ADDR_WIDTH == 1) begin : g_depth_two_full_compare
+            assign rd_gray_full_compare = ~rd_gray_sync2;
+        end else begin : g_larger_fifo_full_compare
+            assign rd_gray_full_compare =
+                {~rd_gray_sync2[PTR_WIDTH-1:PTR_WIDTH-2],
+                  rd_gray_sync2[PTR_WIDTH-3:0]};
+        end
+    endgenerate
     assign full_next  = (wr_gray_next == rd_gray_full_compare);
     assign empty_next = (rd_gray_next == wr_gray_sync2);
 

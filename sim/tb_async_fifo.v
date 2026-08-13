@@ -14,6 +14,12 @@ module tb_async_fifo;
     reg rd_en;
     wire [DATA_WIDTH-1:0] rd_data;
     wire empty;
+    reg small_wr_en;
+    reg [7:0] small_wr_data;
+    wire small_full;
+    reg small_rd_en;
+    wire [7:0] small_rd_data;
+    wire small_empty;
     integer i;
     integer errors;
 
@@ -28,6 +34,18 @@ module tb_async_fifo;
         .rd_data(rd_data), .empty(empty)
     );
 
+    // Minimum legal Gray-pointer FIFO depth, also used by the Request FIFO.
+    async_fifo #(
+        .DATA_WIDTH(8),
+        .FIFO_DEPTH(2),
+        .ADDR_WIDTH(1)
+    ) dut_depth_two (
+        .wr_clk(wr_clk), .wr_rst_n(wr_rst_n), .wr_en(small_wr_en),
+        .wr_data(small_wr_data), .full(small_full),
+        .rd_clk(rd_clk), .rd_rst_n(rd_rst_n), .rd_en(small_rd_en),
+        .rd_data(small_rd_data), .empty(small_empty)
+    );
+
     initial wr_clk = 1'b0;
     always #5 wr_clk = ~wr_clk;
     initial rd_clk = 1'b0;
@@ -39,6 +57,9 @@ module tb_async_fifo;
         wr_en = 1'b0;
         rd_en = 1'b0;
         wr_data = 8'b0;
+        small_wr_en = 1'b0;
+        small_wr_data = 8'b0;
+        small_rd_en = 1'b0;
         errors = 0;
         #30;
         wr_rst_n = 1'b1;
@@ -68,6 +89,36 @@ module tb_async_fifo;
         @(negedge rd_clk);
         rd_en = 1'b0;
         wait (empty === 1'b1);
+
+        // Verify that the two-entry configuration reaches full and preserves
+        // both words across the asynchronous clock boundary.
+        @(negedge wr_clk);
+        small_wr_en = 1'b1;
+        small_wr_data = 8'ha5;
+        @(negedge wr_clk);
+        small_wr_data = 8'h5a;
+        @(negedge wr_clk);
+        small_wr_en = 1'b0;
+        wait (small_full === 1'b1);
+        wait (small_empty === 1'b0);
+
+        @(negedge rd_clk);
+        small_rd_en = 1'b1;
+        @(posedge rd_clk);
+        #1;
+        if (small_rd_data !== 8'ha5) begin
+            $display("ERROR: depth-two FIFO first word=%02x", small_rd_data);
+            errors = errors + 1;
+        end
+        @(posedge rd_clk);
+        #1;
+        if (small_rd_data !== 8'h5a) begin
+            $display("ERROR: depth-two FIFO second word=%02x", small_rd_data);
+            errors = errors + 1;
+        end
+        @(negedge rd_clk);
+        small_rd_en = 1'b0;
+        wait (small_empty === 1'b1);
 
         if (errors == 0)
             $display("PASS: async_fifo full-depth test");
