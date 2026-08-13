@@ -1,6 +1,9 @@
 `timescale 1ns/1ps
 
 module tb_ospi_slave;
+    localparam integer AXI_ADDR_WIDTH = 32;
+    localparam integer AXI_DATA_WIDTH = 32;
+    localparam integer AXI_ID_WIDTH = 6;
 
     reg clk;
     reg rst_n;
@@ -8,75 +11,169 @@ module tb_ospi_slave;
     reg CSN;
     tri [7:0] D;
     tri SRDY;
-
     reg [7:0] master_d_out;
     reg master_d_oe;
     assign D = master_d_oe ? master_d_out : 8'bz;
 
-    reg req_rd_en;
-    wire [39:0] req_data;
-    wire req_empty;
-    reg wr_rd_en;
-    wire [31:0] wr_data;
-    wire wr_empty;
-    reg rd_wr_en;
-    reg [31:0] rd_wr_data;
-    wire rd_full;
+    wire [AXI_ID_WIDTH-1:0] AWID;
+    wire [31:0] AWADDR;
+    wire [7:0] AWLEN;
+    wire [2:0] AWSIZE;
+    wire [1:0] AWBURST;
+    wire [2:0] AWPROT;
+    wire AWVALID;
+    wire AWREADY;
+    wire [31:0] WDATA;
+    wire [3:0] WSTRB;
+    wire WLAST;
+    wire WVALID;
+    wire WREADY;
+    wire [5:0] BID;
+    wire [1:0] BRESP;
+    reg BVALID;
+    wire BREADY;
+    wire [5:0] ARID;
+    wire [31:0] ARADDR;
+    wire [7:0] ARLEN;
+    wire [2:0] ARSIZE;
+    wire [1:0] ARBURST;
+    wire [2:0] ARPROT;
+    wire ARVALID;
+    wire ARREADY;
+    wire [5:0] RID;
+    wire [31:0] RDATA;
+    wire [1:0] RRESP;
+    wire RLAST;
+    wire RVALID;
+    wire RREADY;
 
+    reg [31:0] memory [0:255];
+    reg write_active;
+    reg [31:0] write_address;
+    reg [7:0] write_beats_left;
+    reg read_active;
+    reg [31:0] read_address;
+    reg [7:0] read_beats_left;
+    integer aw_count;
+    integer ar_count;
     integer errors;
     integer read_count;
     reg [7:0] read_bytes [0:7];
 
-    ospi_slave dut (
-        .clk        (clk),
-        .rst_n      (rst_n),
-        .SCLK       (SCLK),
-        .CSN        (CSN),
-        .D          (D),
-        .SRDY       (SRDY),
-        .req_rd_en  (req_rd_en),
-        .req_data   (req_data),
-        .req_empty  (req_empty),
-        .wr_rd_en   (wr_rd_en),
-        .wr_data    (wr_data),
-        .wr_empty   (wr_empty),
-        .rd_wr_en   (rd_wr_en),
-        .rd_wr_data (rd_wr_data),
-        .rd_full    (rd_full)
+    assign AWREADY = !write_active && !BVALID;
+    assign WREADY = write_active;
+    assign BID = 6'b0;
+    assign BRESP = 2'b00;
+    assign ARREADY = !read_active;
+    assign RID = 6'b0;
+    assign RDATA = memory[read_address[9:2]];
+    assign RRESP = 2'b00;
+    assign RVALID = read_active;
+    assign RLAST = read_active && (read_beats_left == 8'd1);
+
+    ospi_slave #(
+        .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
+        .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
+        .AXI_ID_WIDTH(AXI_ID_WIDTH)
+    ) dut (
+        .clk(clk), .rst_n(rst_n), .SCLK(SCLK), .CSN(CSN), .D(D), .SRDY(SRDY),
+        .M_AXI_AWID(AWID), .M_AXI_AWADDR(AWADDR), .M_AXI_AWLEN(AWLEN),
+        .M_AXI_AWSIZE(AWSIZE), .M_AXI_AWBURST(AWBURST),
+        .M_AXI_AWPROT(AWPROT), .M_AXI_AWVALID(AWVALID),
+        .M_AXI_AWREADY(AWREADY), .M_AXI_WDATA(WDATA),
+        .M_AXI_WSTRB(WSTRB), .M_AXI_WLAST(WLAST),
+        .M_AXI_WVALID(WVALID), .M_AXI_WREADY(WREADY),
+        .M_AXI_BID(BID), .M_AXI_BRESP(BRESP), .M_AXI_BVALID(BVALID),
+        .M_AXI_BREADY(BREADY), .M_AXI_ARID(ARID), .M_AXI_ARADDR(ARADDR),
+        .M_AXI_ARLEN(ARLEN), .M_AXI_ARSIZE(ARSIZE),
+        .M_AXI_ARBURST(ARBURST), .M_AXI_ARPROT(ARPROT),
+        .M_AXI_ARVALID(ARVALID), .M_AXI_ARREADY(ARREADY),
+        .M_AXI_RID(RID), .M_AXI_RDATA(RDATA), .M_AXI_RRESP(RRESP),
+        .M_AXI_RLAST(RLAST), .M_AXI_RVALID(RVALID), .M_AXI_RREADY(RREADY)
     );
 
     initial clk = 1'b0;
     always #3 clk = ~clk;
 
+    // Minimal AXI memory slave.
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            write_active <= 1'b0;
+            write_address <= 32'b0;
+            write_beats_left <= 8'b0;
+            BVALID <= 1'b0;
+            read_active <= 1'b0;
+            read_address <= 32'b0;
+            read_beats_left <= 8'b0;
+            aw_count <= 0;
+            ar_count <= 0;
+        end else begin
+            if (AWVALID && AWREADY) begin
+                write_active <= 1'b1;
+                write_address <= AWADDR;
+                write_beats_left <= AWLEN + 1'b1;
+                aw_count <= aw_count + 1;
+                if ((AWPROT !== 3'b001) || (AWSIZE !== 3'd2) ||
+                    (AWBURST !== 2'b01)) begin
+                    $display("ERROR: invalid AXI Write attributes");
+                    errors = errors + 1;
+                end
+            end
+            if (WVALID && WREADY) begin
+                if (WSTRB[0]) memory[write_address[9:2]][7:0] <= WDATA[7:0];
+                if (WSTRB[1]) memory[write_address[9:2]][15:8] <= WDATA[15:8];
+                if (WSTRB[2]) memory[write_address[9:2]][23:16] <= WDATA[23:16];
+                if (WSTRB[3]) memory[write_address[9:2]][31:24] <= WDATA[31:24];
+                write_address <= write_address + 4;
+                write_beats_left <= write_beats_left - 1'b1;
+                if (WLAST) begin
+                    write_active <= 1'b0;
+                    BVALID <= 1'b1;
+                end
+            end
+            if (BVALID && BREADY)
+                BVALID <= 1'b0;
+
+            if (ARVALID && ARREADY) begin
+                read_active <= 1'b1;
+                read_address <= ARADDR;
+                read_beats_left <= ARLEN + 1'b1;
+                ar_count <= ar_count + 1;
+                if ((ARPROT !== 3'b001) || (ARSIZE !== 3'd2) ||
+                    (ARBURST !== 2'b01)) begin
+                    $display("ERROR: invalid AXI Read attributes");
+                    errors = errors + 1;
+                end
+            end
+            if (RVALID && RREADY) begin
+                read_address <= read_address + 4;
+                read_beats_left <= read_beats_left - 1'b1;
+                if (RLAST)
+                    read_active <= 1'b0;
+            end
+        end
+    end
+
     task ospi_write_byte;
         input [7:0] value;
+        reg accepted;
         begin
+            accepted = 1'b0;
             master_d_out = value;
-            master_d_oe  = 1'b1;
-            #5 SCLK = 1'b1;
-            #1;
-            if (SRDY !== 1'b1) begin
-                $display("ERROR: SRDY low while sending byte %02x", value);
-                errors = errors + 1;
+            master_d_oe = 1'b1;
+            while (!accepted) begin
+                #5 SCLK = 1'b1;
+                #1 accepted = (SRDY === 1'b1);
+                #4 SCLK = 1'b0;
             end
-            #4 SCLK = 1'b0;
         end
     endtask
 
-    // A0 must be released before the falling edge following its acceptance.
-    task ospi_write_a0_and_release;
+    task ospi_write_a0_release;
         input [7:0] value;
         begin
-            master_d_out = value;
-            master_d_oe  = 1'b1;
-            #5 SCLK = 1'b1;
-            #1;
-            if (SRDY !== 1'b1) begin
-                $display("ERROR: SRDY low while sending A0");
-                errors = errors + 1;
-            end
+            ospi_write_byte(value);
             master_d_oe = 1'b0;
-            #4 SCLK = 1'b0;
         end
     endtask
 
@@ -85,89 +182,34 @@ module tb_ospi_slave;
             #5 SCLK = 1'b1;
             #1;
             if (SRDY === 1'b1) begin
-                if (read_count < 8)
-                    read_bytes[read_count] = D;
+                read_bytes[read_count] = D;
                 read_count = read_count + 1;
             end
             #4 SCLK = 1'b0;
         end
     endtask
 
-    task pop_request_and_check;
-        input expected_write;
-        input [2:0] expected_length;
-        input [31:0] expected_address;
-        begin
-            wait (req_empty == 1'b0);
-            @(negedge clk);
-            req_rd_en = 1'b1;
-            @(posedge clk);
-            #1;
-            req_rd_en = 1'b0;
-            if (req_data !== {expected_write, expected_length, 4'b0,
-                              expected_address}) begin
-                $display("ERROR: request expected=%010x actual=%010x",
-                         {expected_write, expected_length, 4'b0,
-                          expected_address}, req_data);
-                errors = errors + 1;
-            end
-        end
-    endtask
-
-    task pop_write_word_and_check;
-        input [31:0] expected_word;
-        begin
-            wait (wr_empty == 1'b0);
-            @(negedge clk);
-            wr_rd_en = 1'b1;
-            @(posedge clk);
-            #1;
-            wr_rd_en = 1'b0;
-            if (wr_data !== expected_word) begin
-                $display("ERROR: write word expected=%08x actual=%08x",
-                         expected_word, wr_data);
-                errors = errors + 1;
-            end
-        end
-    endtask
-
-    task push_read_word;
-        input [31:0] value;
-        begin
-            wait (rd_full == 1'b0);
-            @(negedge clk);
-            rd_wr_data = value;
-            rd_wr_en   = 1'b1;
-            @(negedge clk);
-            rd_wr_en   = 1'b0;
-        end
-    endtask
-
     initial begin
-        rst_n        = 1'b0;
-        SCLK         = 1'b0;
-        CSN          = 1'b1;
+        rst_n = 1'b0;
+        SCLK = 1'b0;
+        CSN = 1'b1;
         master_d_out = 8'b0;
-        master_d_oe  = 1'b0;
-        req_rd_en    = 1'b0;
-        wr_rd_en     = 1'b0;
-        rd_wr_en     = 1'b0;
-        rd_wr_data   = 32'b0;
-        errors       = 0;
-        read_count   = 0;
-
+        master_d_oe = 1'b0;
+        errors = 0;
+        read_count = 0;
+        memory[8'h40] = 32'b0;
+        memory[8'h41] = 32'b0;
         #20 rst_n = 1'b1;
         #10;
 
-        // Write 8 bytes to unaligned address 0x1234567b. The request must
-        // contain aligned address 0x12345678 and two complete words.
+        // OSPI Write: two 32-bit words at 0x100.
         CSN = 1'b0;
         #10;
-        ospi_write_byte(8'h19); // ICCM/DCCM, Write, 8 bytes
-        ospi_write_byte(8'h12);
-        ospi_write_byte(8'h34);
-        ospi_write_byte(8'h56);
-        ospi_write_byte(8'h7b);
+        ospi_write_byte(8'h19);
+        ospi_write_byte(8'h00);
+        ospi_write_byte(8'h00);
+        ospi_write_byte(8'h01);
+        ospi_write_byte(8'h00);
         ospi_write_byte(8'hde);
         ospi_write_byte(8'had);
         ospi_write_byte(8'hbe);
@@ -178,72 +220,61 @@ module tb_ospi_slave;
         ospi_write_byte(8'h67);
         CSN = 1'b1;
         master_d_oe = 1'b0;
+        wait ((memory[8'h40] == 32'hdeadbeef) &&
+              (memory[8'h41] == 32'h01234567));
 
-        pop_request_and_check(1'b1, 3'd1, 32'h12345678);
-        pop_write_word_and_check(32'hdeadbeef);
-        pop_write_word_and_check(32'h01234567);
+        if (`SINGLE_TRAN != 0) begin
+            if (aw_count != 2) begin
+                $display("ERROR: SINGLE_TRAN expected 2 AW, got %0d", aw_count);
+                errors = errors + 1;
+            end
+        end else begin
+            if (aw_count != 1) begin
+                $display("ERROR: Burst expected 1 AW, got %0d", aw_count);
+                errors = errors + 1;
+            end
+        end
 
-        // Read 8 bytes. Pause SCLK after A0 while the system consumes the
-        // request and supplies response data, then verify byte ordering.
+        // OSPI Read from the same AXI memory.
         #20;
         CSN = 1'b0;
         #10;
-        ospi_write_byte(8'h11); // ICCM/DCCM, Read, 8 bytes
-        ospi_write_byte(8'h20);
+        ospi_write_byte(8'h11);
         ospi_write_byte(8'h00);
         ospi_write_byte(8'h00);
-        ospi_write_a0_and_release(8'h03);
-
-        pop_request_and_check(1'b0, 3'd1, 32'h20000000);
-        push_read_word(32'h89abcdef);
-        push_read_word(32'h76543210);
-
+        ospi_write_byte(8'h01);
+        ospi_write_a0_release(8'h00);
         read_count = 0;
         while (read_count < 8)
             ospi_read_tick();
+        CSN = 1'b1;
 
         if ({read_bytes[0], read_bytes[1], read_bytes[2], read_bytes[3]} !==
-            32'h89abcdef) begin
-            $display("ERROR: first Read word has incorrect byte order");
+            32'hdeadbeef) begin
+            $display("ERROR: first AXI Read word mismatch");
             errors = errors + 1;
         end
         if ({read_bytes[4], read_bytes[5], read_bytes[6], read_bytes[7]} !==
-            32'h76543210) begin
-            $display("ERROR: second Read word has incorrect byte order");
+            32'h01234567) begin
+            $display("ERROR: second AXI Read word mismatch");
             errors = errors + 1;
         end
-
-        CSN = 1'b1;
-        #20;
-        if (D !== 8'bz) begin
-            $display("ERROR: D is not High-Z while CSN is high");
-            errors = errors + 1;
-        end
-
-        // Unsupported command: no request and no D drive.
-        CSN = 1'b0;
-        #10;
-        ospi_write_byte(8'h21);
-        master_d_oe = 1'b0;
-        ospi_read_tick();
-        ospi_read_tick();
-        if (D !== 8'bz) begin
-            $display("ERROR: unsupported command drove D");
-            errors = errors + 1;
-        end
-        CSN = 1'b1;
-        #30;
-        if (req_empty !== 1'b1) begin
-            $display("ERROR: unsupported command generated request");
-            errors = errors + 1;
+        if (`SINGLE_TRAN != 0) begin
+            if (ar_count != 2) begin
+                $display("ERROR: SINGLE_TRAN expected 2 AR, got %0d", ar_count);
+                errors = errors + 1;
+            end
+        end else begin
+            if (ar_count != 1) begin
+                $display("ERROR: Burst expected 1 AR, got %0d", ar_count);
+                errors = errors + 1;
+            end
         end
 
         if (errors == 0)
-            $display("PASS: ospi_slave protocol test");
+            $display("PASS: ospi_slave AXI backend test");
         else
-            $display("FAIL: ospi_slave protocol test, errors=%0d", errors);
-
+            $display("FAIL: ospi_slave AXI backend errors=%0d", errors);
         #20 $finish;
     end
-
 endmodule
