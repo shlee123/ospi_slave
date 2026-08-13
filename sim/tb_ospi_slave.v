@@ -1,5 +1,9 @@
 `timescale 1ns/1ps
 
+`ifndef TB_SRDY_OPEN_DRAIN
+`define TB_SRDY_OPEN_DRAIN 0
+`endif
+
 module tb_ospi_slave;
     localparam integer AXI_ADDR_WIDTH = 32;
     localparam integer AXI_DATA_WIDTH = 32;
@@ -10,7 +14,7 @@ module tb_ospi_slave;
     reg SCLK;
     reg CSN;
     tri [7:0] D;
-    tri SRDY;
+    tri1 SRDY;
     reg [7:0] master_d_out;
     reg master_d_oe;
     assign D = master_d_oe ? master_d_out : 8'bz;
@@ -74,7 +78,8 @@ module tb_ospi_slave;
     ospi_slave #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
         .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
-        .AXI_ID_WIDTH(AXI_ID_WIDTH)
+        .AXI_ID_WIDTH(AXI_ID_WIDTH),
+        .SRDY_OPEN_DRAIN(`TB_SRDY_OPEN_DRAIN)
     ) dut (
         .clk(clk), .rst_n(rst_n), .SCLK(SCLK), .CSN(CSN), .D(D), .SRDY(SRDY),
         .M_AXI_AWID(AWID), .M_AXI_AWADDR(AWADDR), .M_AXI_AWLEN(AWLEN),
@@ -201,6 +206,23 @@ module tb_ospi_slave;
         memory[8'h41] = 32'b0;
         #20 rst_n = 1'b1;
         #10;
+
+        if (`TB_SRDY_OPEN_DRAIN != 0) begin
+            if ((SRDY !== 1'b1) || (dut.core_srdy_oe !== 1'b0)) begin
+                $display("ERROR: open-drain SRDY must release while unselected");
+                errors = errors + 1;
+            end
+        end else begin
+            if ((SRDY !== 1'b1) || (dut.core_srdy_oe !== 1'b1)) begin
+                $display("ERROR: push-pull SRDY must drive high while unselected");
+                errors = errors + 1;
+            end
+        end
+        if ((D !== 8'hzz) || (dut.core_d_ie !== 1'b0) ||
+            (dut.core_srdy_ie !== 1'b0)) begin
+            $display("ERROR: unselected OSPI IO enable state mismatch");
+            errors = errors + 1;
+        end
 
         // OSPI Write: two 32-bit words at 0x100.
         CSN = 1'b0;
