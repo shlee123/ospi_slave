@@ -18,8 +18,14 @@
 // For a Read request, system logic writes exactly TransferLength/4 words to
 // the Read-data FIFO using rd_wr_en/rd_wr_data. rd_full provides backpressure.
 module ospi_slave #(
-    parameter integer FIFO_DEPTH     = 32,
-    parameter integer FIFO_ADDR_WIDTH = 5,
+    parameter integer FIFO_DEPTH       = 32,
+    parameter integer FIFO_ADDR_WIDTH  = 5,
+    // A conventional Gray-pointer asynchronous FIFO requires at least two
+    // entries. One outstanding request is sufficient for this protocol; the
+    // second entry prevents A0 backpressure while the first request crosses
+    // into the clk domain.
+    parameter integer REQ_FIFO_DEPTH   = 2,
+    parameter integer REQ_ADDR_WIDTH   = 1,
     // 0: push-pull SRDY for a single slave; 1: open-drain SRDY
     parameter integer SRDY_OPEN_DRAIN = 0
 ) (
@@ -126,8 +132,8 @@ module ospi_slave #(
 
     async_fifo #(
         .DATA_WIDTH (40),
-        .FIFO_DEPTH (FIFO_DEPTH),
-        .ADDR_WIDTH (FIFO_ADDR_WIDTH)
+        .FIFO_DEPTH (REQ_FIFO_DEPTH),
+        .ADDR_WIDTH (REQ_ADDR_WIDTH)
     ) u_request_fifo (
         .wr_clk   (SCLK),
         .wr_rst_n (rst_n),
