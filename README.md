@@ -6,8 +6,26 @@ ICCM/DCCM data through an AXI4 master interface in the `clk` domain.
 
 ## RTL
 
-- `rtl/ospi_slave.v`: OSPI protocol engine, CDC FIFOs and AXI4 master.
+- `rtl/ospi_slave.v`: compatibility top-level wrapper.
+- `rtl/io_top.v`: synthesizable RTL pad model for input, bidirectional,
+  input-enable, output-enable and High-Z behavior.
+- `rtl/ospi_slave_core.v`: pure-digital OSPI protocol engine, CDC FIFOs and
+  AXI4 master; it contains no `inout` ports or High-Z assignments.
 - `rtl/async_fifo.v`: function-free Gray-pointer asynchronous FIFO.
+
+`ospi_slave` instantiates `io_top` and `ospi_slave_core`. The existing external
+OSPI and AXI port list remains compatible. During ASIC integration, `io_top`
+can be replaced with technology-specific IO cells without modifying the core.
+
+The `D[7:0]` input buffer is enabled only during Command, Address and Write
+phases. When disabled, the core sees `8'h00`; the physical pad still exposes
+electrical contention as `X` in RTL simulation. `D[7:0]` is driven only during
+Read data and is High-Z while unselected. Dedicated `clk`, `rst_n`, `SCLK` and
+`CSN` input buffers are permanently enabled.
+
+`SRDY` uses a bidirectional pad model with its input buffer disabled. In
+push-pull mode it always drives the required logic level. In open-drain mode it
+only drives low while selected and busy, and otherwise releases High-Z.
 
 The Request FIFO is internal and two entries deep. Its 40-bit word is formed
 inside `ospi_slave` directly from the captured command and address signals:
@@ -49,9 +67,10 @@ cd sim
 make clean all
 ```
 
-The test suite covers the 32-entry and two-entry FIFO configurations, AXI
-single transactions, AXI bursts, OSPI Write-to-AXI memory, AXI-memory-to-OSPI
-Read, byte ordering, address use and AXI attributes.
+The test suite covers the RTL pad model and IE/OE/High-Z behavior, 32-entry and
+two-entry FIFO configurations, AXI single transactions, AXI bursts, OSPI
+Write-to-AXI memory, AXI-memory-to-OSPI Read, byte ordering, address use and
+AXI attributes.
 
 All synthesizable RTL is Verilog-2005 and contains no `function` or
 `always_ff` constructs.
