@@ -1,31 +1,35 @@
-# ospi_slave
+# OSPI slave RTL
 
-Custom OSPI protocol slave controller implemented in Verilog.
+This deliverable implements the custom 8-bit SDR OSPI slave defined by
+`OSPI_Specification(10).pdf`.
 
-## Project goal
+## Files
 
-This repository develops a reusable OSPI slave controller, including RTL,
-simulation testbenches, protocol verification, and implementation support.
+- `rtl/ospi_slave.v`: OSPI protocol engine and three clock-domain crossing
+  FIFOs.
+- `rtl/async_fifo.v`: function-free dual-clock FIFO, default 32 entries.
+- `sim/tb_ospi_slave.v`: Write, Read, address-alignment, byte-order and
+  unsupported-command tests.
+- `sim/Makefile`: Verilog-2005 syntax and simulation targets.
 
-## Directory structure
+## Backend interface
 
-- `rtl/`: synthesizable design code
-- `sim/`: simulation testbenches and run environment
-- `model/`: reference and behavioral models
+All backend ports use `clk`. Each FIFO read output is registered and changes
+on the `clk` rising edge accepting its read enable.
 
-## Current RTL
+`req_data[39:0]` is `{write, length_code, 4'b0, effective_address}`. The system
+reads requests using `req_rd_en`. Write words are read using `wr_rd_en`. For a
+Read request, system logic writes the requested words through
+`rd_wr_en/rd_wr_data`, observing `rd_full`.
 
-`rtl/async_fifo.v` provides a dual-clock asynchronous FIFO with parameterized
-data width and depth. Defaults are 8-bit data and 32 entries. `FIFO_DEPTH`
-must be a power of two.
+The default FIFO depth is 32 words. The 512-byte protocol transfer is streamed
+through the FIFO and does not require all 128 words to be resident at once.
 
-Run the smoke test with Icarus Verilog:
+## Simulation
 
 ```sh
 cd sim
-make
+make clean all
 ```
 
-## Status
-
-Asynchronous FIFO added as the first reusable OSPI controller component.
+The RTL is Verilog-2005 and contains no `function` or `always_ff` constructs.

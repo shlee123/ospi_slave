@@ -1,11 +1,14 @@
 `timescale 1ns/1ps
 
-// Asynchronous FIFO with independent write and read clock domains.
-// FIFO_DEPTH must be a power of two so that Gray-code pointers can be used
-// safely for clock-domain crossing.
+// Dual-clock asynchronous FIFO.
+// Default depth is 32 entries. ADDR_WIDTH and FIFO_DEPTH must agree, and
+// FIFO_DEPTH must be a power of two.
+//
+// This implementation uses only Verilog-2005 constructs.
 module async_fifo #(
     parameter integer DATA_WIDTH = 8,
-    parameter integer FIFO_DEPTH = 32
+    parameter integer FIFO_DEPTH = 32,
+    parameter integer ADDR_WIDTH = 5
 ) (
     input  wire                  wr_clk,
     input  wire                  wr_rst_n,
@@ -20,18 +23,7 @@ module async_fifo #(
     output reg                   empty
 );
 
-    function integer clog2;
-        input integer value;
-        integer temp;
-        begin
-            temp = value - 1;
-            for (clog2 = 0; temp > 0; clog2 = clog2 + 1)
-                temp = temp >> 1;
-        end
-    endfunction
-
-    localparam integer ADDR_WIDTH = clog2(FIFO_DEPTH);
-    localparam integer PTR_WIDTH  = ADDR_WIDTH + 1;
+    localparam integer PTR_WIDTH = ADDR_WIDTH + 1;
 
     reg [DATA_WIDTH-1:0] mem [0:FIFO_DEPTH-1];
 
@@ -45,34 +37,31 @@ module async_fifo #(
     (* ASYNC_REG = "TRUE" *) reg [PTR_WIDTH-1:0] wr_gray_sync1;
     (* ASYNC_REG = "TRUE" *) reg [PTR_WIDTH-1:0] wr_gray_sync2;
 
-    function [PTR_WIDTH-1:0] gray_to_bin;
-        input [PTR_WIDTH-1:0] gray;
-        integer i;
-        begin
-            gray_to_bin[PTR_WIDTH-1] = gray[PTR_WIDTH-1];
-            for (i = PTR_WIDTH-2; i >= 0; i = i - 1)
-                gray_to_bin[i] = gray_to_bin[i+1] ^ gray[i];
-        end
-    endfunction
+    wire write_accept;
+    wire read_accept;
+    wire [PTR_WIDTH-1:0] wr_bin_next;
+    wire [PTR_WIDTH-1:0] rd_bin_next;
+    wire [PTR_WIDTH-1:0] wr_gray_next;
+    wire [PTR_WIDTH-1:0] rd_gray_next;
+    wire [PTR_WIDTH-1:0] rd_gray_full_compare;
+    wire full_next;
+    wire empty_next;
 
-    wire write_accept = wr_en && !full;
-    wire read_accept  = rd_en && !empty;
+    assign write_accept = wr_en && !full;
+    assign read_accept  = rd_en && !empty;
 
-    wire [PTR_WIDTH-1:0] wr_bin_next = wr_bin + write_accept;
-    wire [PTR_WIDTH-1:0] rd_bin_next = rd_bin + read_accept;
-    wire [PTR_WIDTH-1:0] wr_gray_next =
-        (wr_bin_next >> 1) ^ wr_bin_next;
-    wire [PTR_WIDTH-1:0] rd_gray_next =
-        (rd_bin_next >> 1) ^ rd_bin_next;
+    assign wr_bin_next  = wr_bin + write_accept;
+    assign rd_bin_next  = rd_bin + read_accept;
+    assign wr_gray_next = (wr_bin_next >> 1) ^ wr_bin_next;
+    assign rd_gray_next = (rd_bin_next >> 1) ^ rd_bin_next;
 
-    wire [PTR_WIDTH-1:0] rd_bin_sync = gray_to_bin(rd_gray_sync2);
-
-    // The extra pointer bit distinguishes equal addresses that are one full
-    // FIFO span apart.
-    wire full_next =
-        (wr_bin_next[PTR_WIDTH-1] != rd_bin_sync[PTR_WIDTH-1]) &&
-        (wr_bin_next[ADDR_WIDTH-1:0] == rd_bin_sync[ADDR_WIDTH-1:0]);
-    wire empty_next = (rd_gray_next == wr_gray_sync2);
+    // A full FIFO is detected by comparing the next write Gray pointer with
+    // the synchronized read Gray pointer after inverting its two MSBs.
+    assign rd_gray_full_compare =
+        {~rd_gray_sync2[PTR_WIDTH-1:PTR_WIDTH-2],
+          rd_gray_sync2[PTR_WIDTH-3:0]};
+    assign full_next  = (wr_gray_next == rd_gray_full_compare);
+    assign empty_next = (rd_gray_next == wr_gray_sync2);
 
 `ifndef SYNTHESIS
     initial begin
@@ -84,10 +73,13 @@ module async_fifo #(
             $display("ERROR: async_fifo FIFO_DEPTH must be a power of two >= 2");
             $finish;
         end
+        if (FIFO_DEPTH != (1 << ADDR_WIDTH)) begin
+            $display("ERROR: async_fifo FIFO_DEPTH must equal 2**ADDR_WIDTH");
+            $finish;
+        end
     end
 `endif
 
-    // Write-domain storage and pointer update.
     always @(posedge wr_clk or negedge wr_rst_n) begin
         if (!wr_rst_n) begin
             wr_bin  <= {PTR_WIDTH{1'b0}};
@@ -103,8 +95,8 @@ module async_fifo #(
         end
     end
 
-    // Read-domain data and pointer update. rd_data changes only after an
-    // accepted read and retains its previous value while the FIFO is empty.
+    // rd_data is registered. It changes on the read-clock edge that accepts
+    // rd_en and holds its previous value when no read is accepted.
     always @(posedge rd_clk or negedge rd_rst_n) begin
         if (!rd_rst_n) begin
             rd_bin  <= {PTR_WIDTH{1'b0}};
@@ -121,7 +113,6 @@ module async_fifo #(
         end
     end
 
-    // Synchronize the Gray-coded read pointer into the write domain.
     always @(posedge wr_clk or negedge wr_rst_n) begin
         if (!wr_rst_n) begin
             rd_gray_sync1 <= {PTR_WIDTH{1'b0}};
@@ -132,7 +123,6 @@ module async_fifo #(
         end
     end
 
-    // Synchronize the Gray-coded write pointer into the read domain.
     always @(posedge rd_clk or negedge rd_rst_n) begin
         if (!rd_rst_n) begin
             wr_gray_sync1 <= {PTR_WIDTH{1'b0}};
