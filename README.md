@@ -80,15 +80,24 @@ make clean all SIMULATOR=iverilog
 The simulation Makefile defaults to VCS and selects VCS or Icarus Verilog
 through `SIMULATOR`. It
 selects the testbench through `TESTBENCH`. VCS simulations generate
-`fsdb/<testbench-name>.fsdb`; all simulations write
-`log/<testbench-name>.log`. The output directories are created automatically.
+`fsdb/<testbench-and-parameters>.fsdb`; all simulations write
+`log/<testbench-and-parameters>.log`. Compile definitions are sorted and added
+to the output name, so parameterized regression runs do not overwrite one
+another. The output directories are created automatically.
 
 ```sh
 make sim TESTBENCH=tb_async_fifo.v
 make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v
+make sim DEFINES="TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0"
 make verdi TESTBENCH=tb_ospi_slave.v
+make verdi DEFINES="TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0"
 make help
 ```
+
+For example, the parameterized command above uses
+`tb_ospi_slave__SINGLE_TRAN-0__TB_AXI_DATA_WIDTH-64` for its build directory,
+FSDB basename and log basename. `AXI_WIDTHS` is the regression width list; each
+item is passed into `tb_ospi_slave` as `TB_AXI_DATA_WIDTH=<width>`.
 
 `make verdi` detects whether the installed Verdi accepts `-sv` or `-v2k`.
 If neither option is advertised by `verdi -help`, it starts Verdi without a

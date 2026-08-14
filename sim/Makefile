@@ -23,10 +23,19 @@ FSDB_DIR ?= fsdb
 LOG_DIR ?= log
 
 TB_TOP := $(basename $(notdir $(TESTBENCH)))
-BUILD_DIR := $(BUILD_ROOT)/$(SIMULATOR)/$(TB_TOP)
+# RUN_NAME rule: append sorted NAME-VALUE compile definitions so parameterized
+# runs keep independent executables, waveforms and logs. An explicit RUN_NAME
+# may be supplied for definitions whose values are not filename-safe.
+empty :=
+space := $(empty) $(empty)
+SORTED_DEFINES := $(sort $(strip $(DEFINES)))
+DEFINE_TAG := $(subst $(space),__,$(subst =,-,$(SORTED_DEFINES)))
+RUN_NAME ?= $(TB_TOP)$(if $(DEFINE_TAG),__$(DEFINE_TAG))
+
+BUILD_DIR := $(BUILD_ROOT)/$(SIMULATOR)/$(RUN_NAME)
 SIMV := $(BUILD_DIR)/simv
-FSDB_FILE := $(FSDB_DIR)/$(TB_TOP).fsdb
-LOG_FILE := $(LOG_DIR)/$(TB_TOP).log
+FSDB_FILE := $(FSDB_DIR)/$(RUN_NAME).fsdb
+LOG_FILE := $(LOG_DIR)/$(RUN_NAME).log
 
 # Tool option variables may be extended or overridden by the local environment.
 IVERILOG_FLAGS ?= -g2005
@@ -154,8 +163,9 @@ run-ospi-open-drain:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
 		DEFINES="TB_SRDY_OPEN_DRAIN=1"
 
-# SINGLE_TRAN=1 regression: every supported width must use AxLEN=0 and
-# serialize a 32-bit OSPI word into multiple transactions on 8/16-bit buses.
+# SINGLE_TRAN=1 regression: every AXI_WIDTHS item is passed to the testbench as
+# TB_AXI_DATA_WIDTH. Every width must use AxLEN=0 and serialize a 32-bit OSPI
+# word into multiple transactions on 8/16-bit buses.
 run-width-single:
 	@for width in $(AXI_WIDTHS); do \
 		$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
@@ -185,7 +195,7 @@ help:
 	@echo "  sim      Compile and run TESTBENCH with SIMULATOR."
 	@echo "  compile  Compile TESTBENCH only."
 	@echo "  run      Run the previously compiled TESTBENCH."
-	@echo "  verdi    Open sources and fsdb/<testbench-name>.fsdb in Verdi."
+	@echo "  verdi    Open sources and the FSDB matching TESTBENCH plus DEFINES."
 	@echo "  all      Run the complete regression suite."
 	@echo "  syntax   Run an Icarus RTL syntax check."
 	@echo "  clean    Remove generated build, FSDB and log outputs."
@@ -195,13 +205,17 @@ help:
 	@echo "  SIMULATOR=vcs|iverilog  Simulation tool (default: vcs)."
 	@echo "  TESTBENCH=<file.v>      Testbench source (default: tb_ospi_slave.v)."
 	@echo "  DEFINES=\"NAME=VALUE ...\" Verilog preprocessor definitions."
+	@echo "  AXI_WIDTHS=\"8 16 ...\" Width list passed as TB_AXI_DATA_WIDTH per run."
+	@echo "  RUN_NAME=<name>         Override generated testbench/parameter output name."
 	@echo "  VERDI_HOME=<path>       Verdi installation used for VCS FSDB PLI."
 	@echo "  VERDI_LANGUAGE_FLAG=auto|none|<flag>  Language option (default: auto)."
 	@echo
 	@echo "Examples:"
 	@echo "  make sim TESTBENCH=tb_async_fifo.v"
 	@echo "  make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v"
+	@echo "  make sim DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
 	@echo "  make verdi TESTBENCH=tb_ospi_slave.v"
+	@echo "  make verdi DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
 	@echo "  make verdi VERDI_LANGUAGE_FLAG=none"
 
 clean:
