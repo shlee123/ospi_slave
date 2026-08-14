@@ -6,8 +6,11 @@
 //
 // This implementation uses only Verilog-2005 constructs.
 module async_fifo #(
+    // Rule: stored word width must be at least 1 bit.
     parameter integer DATA_WIDTH = 8,
+    // Rule: entry count must be a power of two and at least 2.
     parameter integer FIFO_DEPTH = 32,
+    // Rule: must equal log2(FIFO_DEPTH).
     parameter integer ADDR_WIDTH = 5
 ) (
     input  wire                  wr_clk,

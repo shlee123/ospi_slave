@@ -1,22 +1,33 @@
 `timescale 1ns/1ps
 
+// SINGLE_TRAN options:
+//   1 (default): every AXI beat is a separate transaction with AxLEN = 0.
+//   0: issue INCR bursts, split at 256 beats and every 4KB boundary.
 `ifndef SINGLE_TRAN
 `define SINGLE_TRAN 1
 `endif
 
 // Pure-digital custom 8-bit SDR OSPI slave core with an AXI4 master backend.
-// SINGLE_TRAN defaults to 1: one AXI transaction per 32-bit OSPI word.
-// Define SINGLE_TRAN=0 to issue one AXI INCR burst per OSPI request.
 module ospi_slave #(
+    // Rule: OSPI addresses and the AXI address interface are fixed at 32 bits.
     parameter integer AXI_ADDR_WIDTH = 32,
+    // Options: 8, 16, 32, 64, 128, 256, 512 or 1024 bits.
     parameter integer AXI_DATA_WIDTH = 32,
+    // Rule: AXI ID width must be at least 1; default is 6 bits.
     parameter integer AXI_ID_WIDTH = 6,
+    // Option: constant AXI transaction ID, default all zero.
     parameter [AXI_ID_WIDTH-1:0] AXI_ID = {AXI_ID_WIDTH{1'b0}},
+    // Option: AXI AxPROT value, default privileged secure data access.
     parameter [2:0] AXI_PROT = 3'b001,
+    // Rule: Write/Read data FIFO depth, power of two and at least 2.
     parameter integer FIFO_DEPTH = 32,
+    // Rule: must equal log2(FIFO_DEPTH); default 5 for 32 entries.
     parameter integer FIFO_ADDR_WIDTH = 5,
+    // Rule: Request FIFO depth, power of two and at least 2.
     parameter integer REQ_FIFO_DEPTH = 2,
+    // Rule: must equal log2(REQ_FIFO_DEPTH); default 1 for 2 entries.
     parameter integer REQ_ADDR_WIDTH = 1,
+    // Options: 0 = push-pull SRDY, 1 = open-drain SRDY.
     parameter integer SRDY_OPEN_DRAIN = 0
 ) (
     input  wire clk,
@@ -65,7 +76,16 @@ module ospi_slave #(
     output wire M_AXI_RREADY
 );
 
+    // AXI transfers use the whole bus for 8/16-bit configurations and use
+    // 32-bit narrow beats when AXI_DATA_WIDTH is 32 bits or wider.
     localparam integer AXI_STRB_WIDTH = AXI_DATA_WIDTH / 8;
+    localparam integer AXI_BEAT_BYTES = (AXI_DATA_WIDTH < 32) ?
+                                        AXI_STRB_WIDTH : 4;
+    localparam [2:0] AXI_BEAT_SIZE = (AXI_DATA_WIDTH == 8) ? 3'd0 :
+                                     (AXI_DATA_WIDTH == 16) ? 3'd1 : 3'd2;
+    localparam integer AXI_SUBBEATS_PER_WORD =
+                       (AXI_DATA_WIDTH == 8) ? 4 :
+                       (AXI_DATA_WIDTH == 16) ? 2 : 1;
 
     localparam [2:0] OSPI_CMD       = 3'd0;
     localparam [2:0] OSPI_ADDR      = 3'd1;
@@ -85,6 +105,8 @@ module ospi_slave #(
     localparam [3:0] AXI_WR_RESP    = 4'd7;
     localparam [3:0] AXI_RD_ADDR    = 4'd8;
     localparam [3:0] AXI_RD_DATA    = 4'd9;
+    localparam [3:0] AXI_WR_PREP    = 4'd10;
+    localparam [3:0] AXI_RD_PREP    = 4'd11;
 
     reg [2:0] ospi_state;
     reg command_write;
@@ -103,9 +125,12 @@ module ospi_slave #(
 
     reg [3:0] axi_state;
     reg [AXI_ADDR_WIDTH-1:0] axi_address;
-    reg [7:0] axi_words_remaining;
-    reg [7:0] axi_burst_length;
+    reg [9:0] axi_beats_remaining;
+    reg [8:0] axi_burst_length;
+    reg [8:0] axi_burst_beats_remaining;
+    reg [1:0] axi_subbeat_index;
     reg [31:0] axi_write_word;
+    reg [31:0] axi_read_accum;
 
     wire ospi_rst_n;
     wire selected;
@@ -129,6 +154,11 @@ module ospi_slave #(
     wire [31:0] axi_read_word;
     wire [AXI_DATA_WIDTH-1:0] axi_wdata_shifted;
     wire [AXI_STRB_WIDTH-1:0] axi_wstrb_shifted;
+    wire axi_last_subbeat;
+    wire [12:0] axi_bytes_to_4k;
+    wire [12:0] axi_beats_to_4k;
+    wire [9:0] axi_burst_cap;
+    wire [8:0] axi_next_burst_length;
 
     assign ospi_rst_n = rst_n && !CSN;
     assign selected = !CSN;
@@ -147,7 +177,8 @@ module ospi_slave #(
     assign req_fifo_rd_en = (axi_state == AXI_REQ_POP);
     assign wr_fifo_rd_en = (axi_state == AXI_WR_POP) && !wr_empty;
     assign rd_fifo_wr_en = (axi_state == AXI_RD_DATA) &&
-                            M_AXI_RVALID && M_AXI_RREADY;
+                           M_AXI_RVALID && M_AXI_RREADY &&
+                           axi_last_subbeat;
 
     assign d_out = d_out_reg;
     assign d_oe = selected && d_oe_reg;
@@ -193,18 +224,42 @@ module ospi_slave #(
         .rd_data(rd_fifo_data), .empty(rd_empty)
     );
 
-    // The OSPI protocol word is fixed at 32 bits. Wider AXI buses use 32-bit
-    // narrow transfers and select lanes from the aligned AXI address.
-    assign axi_wdata_shifted = {{(AXI_DATA_WIDTH-32){1'b0}}, axi_write_word}
-                               << ((axi_address % AXI_STRB_WIDTH) * 8);
-    assign axi_wstrb_shifted = {{(AXI_STRB_WIDTH-4){1'b0}}, 4'b1111}
-                               << (axi_address % AXI_STRB_WIDTH);
-    assign axi_read_word = M_AXI_RDATA >>
-                           ((axi_address % AXI_STRB_WIDTH) * 8);
+    assign axi_last_subbeat =
+           (axi_subbeat_index == (AXI_SUBBEATS_PER_WORD - 1));
+    assign axi_bytes_to_4k = 13'd4096 - {1'b0, axi_address[11:0]};
+    assign axi_beats_to_4k = axi_bytes_to_4k >> AXI_BEAT_SIZE;
+    assign axi_burst_cap = (axi_beats_remaining > 10'd256) ?
+                           10'd256 : axi_beats_remaining;
+    assign axi_next_burst_length = (`SINGLE_TRAN != 0) ? 9'd1 :
+           ((axi_burst_cap > axi_beats_to_4k) ?
+            axi_beats_to_4k[8:0] : axi_burst_cap[8:0]);
+
+    // Convert between the fixed 32-bit OSPI word and the configured AXI bus.
+    // 8/16-bit buses serialize one OSPI word over 4/2 full-width beats.
+    // Buses >= 32 bits use one 32-bit narrow beat at the addressed byte lane.
+    generate
+        if (AXI_DATA_WIDTH < 32) begin : g_axi_narrow_bus
+            assign axi_wdata_shifted =
+                   axi_write_word >> (axi_subbeat_index * AXI_DATA_WIDTH);
+            assign axi_wstrb_shifted = {AXI_STRB_WIDTH{1'b1}};
+            assign axi_read_word = axi_read_accum |
+                   ({{(32-AXI_DATA_WIDTH){1'b0}}, M_AXI_RDATA} <<
+                    (axi_subbeat_index * AXI_DATA_WIDTH));
+        end else begin : g_axi_word_or_wider_bus
+            assign axi_wdata_shifted =
+                   {{(AXI_DATA_WIDTH-32){1'b0}}, axi_write_word} <<
+                   ((axi_address % AXI_STRB_WIDTH) * 8);
+            assign axi_wstrb_shifted =
+                   {{(AXI_STRB_WIDTH-4){1'b0}}, 4'b1111} <<
+                   (axi_address % AXI_STRB_WIDTH);
+            assign axi_read_word = M_AXI_RDATA >>
+                   ((axi_address % AXI_STRB_WIDTH) * 8);
+        end
+    endgenerate
 
     assign M_AXI_AWID = AXI_ID;
     assign M_AXI_AWADDR = axi_address;
-    assign M_AXI_AWSIZE = 3'd2;
+    assign M_AXI_AWSIZE = AXI_BEAT_SIZE;
     assign M_AXI_AWBURST = 2'b01;
     assign M_AXI_AWPROT = AXI_PROT;
     assign M_AXI_AWVALID = (axi_state == AXI_WR_ADDR);
@@ -214,23 +269,15 @@ module ospi_slave #(
     assign M_AXI_BREADY = (axi_state == AXI_WR_RESP);
     assign M_AXI_ARID = AXI_ID;
     assign M_AXI_ARADDR = axi_address;
-    assign M_AXI_ARSIZE = 3'd2;
+    assign M_AXI_ARSIZE = AXI_BEAT_SIZE;
     assign M_AXI_ARBURST = 2'b01;
     assign M_AXI_ARPROT = AXI_PROT;
     assign M_AXI_ARVALID = (axi_state == AXI_RD_ADDR);
     assign M_AXI_RREADY = (axi_state == AXI_RD_DATA) && !rd_full;
 
-    generate
-        if (`SINGLE_TRAN != 0) begin : g_axi_single
-            assign M_AXI_AWLEN = 8'd0;
-            assign M_AXI_ARLEN = 8'd0;
-            assign M_AXI_WLAST = 1'b1;
-        end else begin : g_axi_burst
-            assign M_AXI_AWLEN = axi_burst_length - 1'b1;
-            assign M_AXI_ARLEN = axi_burst_length - 1'b1;
-            assign M_AXI_WLAST = (axi_words_remaining == 8'd1);
-        end
-    endgenerate
+    assign M_AXI_AWLEN = axi_burst_length - 1'b1;
+    assign M_AXI_ARLEN = axi_burst_length - 1'b1;
+    assign M_AXI_WLAST = (axi_burst_beats_remaining == 9'd1);
 
 `ifndef SYNTHESIS
     initial begin
@@ -238,9 +285,13 @@ module ospi_slave #(
             $display("ERROR: AXI_ADDR_WIDTH must be 32");
             $finish;
         end
-        if ((AXI_DATA_WIDTH < 32) || ((AXI_DATA_WIDTH % 32) != 0) ||
+        if ((AXI_DATA_WIDTH < 8) || (AXI_DATA_WIDTH > 1024) ||
             ((AXI_DATA_WIDTH & (AXI_DATA_WIDTH - 1)) != 0)) begin
-            $display("ERROR: AXI_DATA_WIDTH must be a power-of-two multiple of 32");
+            $display("ERROR: AXI_DATA_WIDTH must be a power of two from 8 through 1024");
+            $finish;
+        end
+        if (AXI_ID_WIDTH < 1) begin
+            $display("ERROR: AXI_ID_WIDTH must be at least 1");
             $finish;
         end
     end
@@ -384,9 +435,12 @@ module ospi_slave #(
         if (!rst_n) begin
             axi_state <= AXI_IDLE;
             axi_address <= {AXI_ADDR_WIDTH{1'b0}};
-            axi_words_remaining <= 8'b0;
-            axi_burst_length <= 8'b0;
+            axi_beats_remaining <= 10'b0;
+            axi_burst_length <= 9'b0;
+            axi_burst_beats_remaining <= 9'b0;
+            axi_subbeat_index <= 2'b0;
             axi_write_word <= 32'b0;
+            axi_read_accum <= 32'b0;
         end else begin
             case (axi_state)
                 AXI_IDLE: begin
@@ -396,16 +450,28 @@ module ospi_slave #(
                 AXI_REQ_POP: axi_state <= AXI_REQ_LATCH;
                 AXI_REQ_LATCH: begin
                     axi_address <= req_fifo_data[31:0];
-                    axi_words_remaining <= 8'd1 << req_fifo_data[38:36];
-                    axi_burst_length <= 8'd1 << req_fifo_data[38:36];
+                    axi_beats_remaining <=
+                        (10'd1 << req_fifo_data[38:36]) *
+                        AXI_SUBBEATS_PER_WORD;
+                    axi_subbeat_index <= 2'b0;
+                    axi_read_accum <= 32'b0;
                     if (req_fifo_data[39])
-                        axi_state <= AXI_WR_ADDR;
+                        axi_state <= AXI_WR_PREP;
                     else
-                        axi_state <= AXI_RD_ADDR;
+                        axi_state <= AXI_RD_PREP;
+                end
+                AXI_WR_PREP: begin
+                    axi_burst_length <= axi_next_burst_length;
+                    axi_burst_beats_remaining <= axi_next_burst_length;
+                    axi_state <= AXI_WR_ADDR;
                 end
                 AXI_WR_ADDR: begin
-                    if (M_AXI_AWREADY)
-                        axi_state <= AXI_WR_POP;
+                    if (M_AXI_AWREADY) begin
+                        if (axi_subbeat_index == 2'd0)
+                            axi_state <= AXI_WR_POP;
+                        else
+                            axi_state <= AXI_WR_DATA;
+                    end
                 end
                 AXI_WR_POP: begin
                     if (!wr_empty)
@@ -417,33 +483,36 @@ module ospi_slave #(
                 end
                 AXI_WR_DATA: begin
                     if (M_AXI_WREADY) begin
-                        if (`SINGLE_TRAN != 0) begin
+                        axi_address <= axi_address + AXI_BEAT_BYTES;
+                        axi_beats_remaining <= axi_beats_remaining - 1'b1;
+                        axi_burst_beats_remaining <=
+                            axi_burst_beats_remaining - 1'b1;
+                        if (axi_last_subbeat)
+                            axi_subbeat_index <= 2'b0;
+                        else
+                            axi_subbeat_index <= axi_subbeat_index + 1'b1;
+
+                        if (axi_burst_beats_remaining == 9'd1) begin
                             axi_state <= AXI_WR_RESP;
-                        end else if (axi_words_remaining == 8'd1) begin
-                            axi_state <= AXI_WR_RESP;
-                        end else begin
-                            axi_address <= axi_address + 4;
-                            axi_words_remaining <= axi_words_remaining - 1'b1;
+                        end else if (axi_last_subbeat) begin
                             axi_state <= AXI_WR_POP;
+                        end else begin
+                            axi_state <= AXI_WR_DATA;
                         end
                     end
                 end
                 AXI_WR_RESP: begin
                     if (M_AXI_BVALID) begin
-                        if (`SINGLE_TRAN != 0) begin
-                            if (axi_words_remaining == 8'd1) begin
-                                axi_words_remaining <= 8'd0;
-                                axi_state <= AXI_IDLE;
-                            end else begin
-                                axi_address <= axi_address + 4;
-                                axi_words_remaining <= axi_words_remaining - 1'b1;
-                                axi_state <= AXI_WR_ADDR;
-                            end
-                        end else begin
-                            axi_words_remaining <= 8'd0;
+                        if (axi_beats_remaining == 10'd0)
                             axi_state <= AXI_IDLE;
-                        end
+                        else
+                            axi_state <= AXI_WR_PREP;
                     end
+                end
+                AXI_RD_PREP: begin
+                    axi_burst_length <= axi_next_burst_length;
+                    axi_burst_beats_remaining <= axi_next_burst_length;
+                    axi_state <= AXI_RD_ADDR;
                 end
                 AXI_RD_ADDR: begin
                     if (M_AXI_ARREADY)
@@ -451,23 +520,25 @@ module ospi_slave #(
                 end
                 AXI_RD_DATA: begin
                     if (M_AXI_RVALID && M_AXI_RREADY) begin
-                        if (`SINGLE_TRAN != 0) begin
-                            if (axi_words_remaining == 8'd1) begin
-                                axi_words_remaining <= 8'd0;
-                                axi_state <= AXI_IDLE;
-                            end else begin
-                                axi_address <= axi_address + 4;
-                                axi_words_remaining <= axi_words_remaining - 1'b1;
-                                axi_state <= AXI_RD_ADDR;
-                            end
+                        axi_address <= axi_address + AXI_BEAT_BYTES;
+                        axi_beats_remaining <= axi_beats_remaining - 1'b1;
+                        axi_burst_beats_remaining <=
+                            axi_burst_beats_remaining - 1'b1;
+
+                        if (axi_last_subbeat) begin
+                            axi_subbeat_index <= 2'b0;
+                            axi_read_accum <= 32'b0;
                         end else begin
-                            if (M_AXI_RLAST || (axi_words_remaining == 8'd1)) begin
-                                axi_words_remaining <= 8'd0;
+                            axi_subbeat_index <= axi_subbeat_index + 1'b1;
+                            axi_read_accum <= axi_read_word;
+                        end
+
+                        if (M_AXI_RLAST ||
+                            (axi_burst_beats_remaining == 9'd1)) begin
+                            if (axi_beats_remaining == 10'd1)
                                 axi_state <= AXI_IDLE;
-                            end else begin
-                                axi_address <= axi_address + 4;
-                                axi_words_remaining <= axi_words_remaining - 1'b1;
-                            end
+                            else
+                                axi_state <= AXI_RD_PREP;
                         end
                     end
                 end
