@@ -75,7 +75,7 @@ module tb_ospi_slave;
     assign RVALID = read_active;
     assign RLAST = read_active && (read_beats_left == 8'd1);
 
-    ospi_slave #(
+    ospi_slave_top #(
         .AXI_ADDR_WIDTH(AXI_ADDR_WIDTH),
         .AXI_DATA_WIDTH(AXI_DATA_WIDTH),
         .AXI_ID_WIDTH(AXI_ID_WIDTH),
