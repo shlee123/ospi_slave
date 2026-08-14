@@ -1,6 +1,14 @@
 `timescale 1ns/1ps
 
 module tb_io_top;
+`ifdef FSDB
+    initial begin
+        $fsdbDumpfile(`FSDB_FILE);
+        $fsdbDumpvars(0, tb_io_top);
+        $fsdbDumpMDA();
+    end
+`endif
+
     reg clk_pad;
     reg rst_n_pad;
     reg SCLK_pad;

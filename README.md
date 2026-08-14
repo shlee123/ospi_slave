@@ -77,6 +77,18 @@ cd sim
 make clean all
 ```
 
+The simulation Makefile selects Icarus Verilog or VCS through `SIMULATOR` and
+selects the testbench through `TESTBENCH`. VCS simulations generate
+`fsdb/<testbench-name>.fsdb`; all simulations write
+`log/<testbench-name>.log`. The output directories are created automatically.
+
+```sh
+make sim TESTBENCH=tb_async_fifo.v
+make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v
+make verdi TESTBENCH=tb_ospi_slave.v
+make help
+```
+
 The test suite covers the RTL pad model and IE/OE/High-Z behavior, 32-entry and
 two-entry FIFO configurations, and AXI Read/Write operation at every supported
 data width in both single and burst modes. Burst regression starts an 8-byte
