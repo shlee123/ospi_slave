@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 
 // RTL pad model. Replace this module with technology-specific IO cells during
-// physical integration; ospi_slave_core remains unchanged.
+// physical integration; the pure-digital ospi_slave remains unchanged.
 module io_top (
     input  wire clk_pad,
     input  wire rst_n_pad,

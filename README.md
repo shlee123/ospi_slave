@@ -6,16 +6,17 @@ ICCM/DCCM data through an AXI4 master interface in the `clk` domain.
 
 ## RTL
 
-- `rtl/ospi_slave.v`: compatibility top-level wrapper.
+- `rtl/ospi_slave_top.v`: top-level wrapper, module `ospi_slave_top`.
 - `rtl/io_top.v`: synthesizable RTL pad model for input, bidirectional,
   input-enable, output-enable and High-Z behavior.
-- `rtl/ospi_slave_core.v`: pure-digital OSPI protocol engine, CDC FIFOs and
-  AXI4 master; it contains no `inout` ports or High-Z assignments.
+- `rtl/ospi_slave.v`: pure-digital module `ospi_slave`, containing the OSPI
+  protocol engine, CDC FIFOs and AXI4 master; it has no `inout` ports or
+  High-Z assignments.
 - `rtl/async_fifo.v`: function-free Gray-pointer asynchronous FIFO.
 
-`ospi_slave` instantiates `io_top` and `ospi_slave_core`. The existing external
-OSPI and AXI port list remains compatible. During ASIC integration, `io_top`
-can be replaced with technology-specific IO cells without modifying the core.
+`ospi_slave_top` instantiates `io_top` and the pure-digital `ospi_slave` core.
+During ASIC integration, `io_top` can be replaced with technology-specific IO
+cells without modifying the core.
 
 The `D[7:0]` input buffer is enabled only during Command, Address and Write
 phases. When disabled, the core sees `8'h00`; the physical pad still exposes
