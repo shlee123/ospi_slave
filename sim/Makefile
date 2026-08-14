@@ -1,8 +1,8 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -ec
 
-# SIMULATOR options: iverilog (default) or vcs.
-SIMULATOR ?= iverilog
+# SIMULATOR options: vcs (default) or iverilog.
+SIMULATOR ?= vcs
 # TESTBENCH rule: Verilog testbench source relative to sim/ (or an absolute path).
 TESTBENCH ?= tb_ospi_slave.v
 # DEFINES rule: space-separated preprocessor definitions, for example
@@ -23,15 +23,27 @@ FSDB_DIR ?= fsdb
 LOG_DIR ?= log
 
 TB_TOP := $(basename $(notdir $(TESTBENCH)))
-BUILD_DIR := $(BUILD_ROOT)/$(SIMULATOR)/$(TB_TOP)
+# RUN_NAME rule: append sorted NAME-VALUE compile definitions so parameterized
+# runs keep independent executables, waveforms and logs. An explicit RUN_NAME
+# may be supplied for definitions whose values are not filename-safe.
+empty :=
+space := $(empty) $(empty)
+SORTED_DEFINES := $(sort $(strip $(DEFINES)))
+DEFINE_TAG := $(subst $(space),__,$(subst =,-,$(SORTED_DEFINES)))
+RUN_NAME ?= $(TB_TOP)$(if $(DEFINE_TAG),__$(DEFINE_TAG))
+
+BUILD_DIR := $(BUILD_ROOT)/$(SIMULATOR)/$(RUN_NAME)
 SIMV := $(BUILD_DIR)/simv
-FSDB_FILE := $(FSDB_DIR)/$(TB_TOP).fsdb
-LOG_FILE := $(LOG_DIR)/$(TB_TOP).log
+FSDB_FILE := $(FSDB_DIR)/$(RUN_NAME).fsdb
+LOG_FILE := $(LOG_DIR)/$(RUN_NAME).log
 
 # Tool option variables may be extended or overridden by the local environment.
 IVERILOG_FLAGS ?= -g2005
-VCS_FLAGS ?= -full64 -v2005 -debug_access+all -kdb
+VCS_FLAGS ?= -full64 -sverilog -debug_access+all -kdb
 VERDI_FLAGS ?=
+# auto probes this Verdi release; use none to omit the language option or
+# provide an explicit option (for example, -sv) for a site-specific setup.
+VERDI_LANGUAGE_FLAG ?= auto
 FSDB_PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
 FSDB_PLI ?= -P $(FSDB_PLI_DIR)/novas.tab $(FSDB_PLI_DIR)/pli.a
 
@@ -112,8 +124,23 @@ verdi: dirs check-testbench
 		echo "ERROR: FSDB not found: $(FSDB_FILE); run with SIMULATOR=vcs first." >&2; \
 		exit 2; \
 	}
-	@$(VERDI) -v2k -f "$(FILELIST)" "$(TESTBENCH)" -top "$(TB_TOP)" \
-		$(VCS_DEFINES) -ssf "$(FSDB_FILE)" $(VERDI_FLAGS) &
+	@verdi_language_flag="$(VERDI_LANGUAGE_FLAG)"; \
+	if [[ "$$verdi_language_flag" == "auto" ]]; then \
+		verdi_help="$$("$(VERDI)" -help 2>&1 || true)"; \
+		if grep -Eq -- '(^|[[:space:]])-sv([[:space:],]|$$)' <<<"$$verdi_help"; then \
+			verdi_language_flag="-sv"; \
+		elif grep -Eq -- '(^|[[:space:]])-v2k([[:space:],]|$$)' <<<"$$verdi_help"; then \
+			verdi_language_flag="-v2k"; \
+		else \
+			verdi_language_flag=""; \
+		fi; \
+	elif [[ "$$verdi_language_flag" == "none" ]]; then \
+		verdi_language_flag=""; \
+	fi; \
+	echo "INFO: Verdi language option: $${verdi_language_flag:-<none>}"; \
+	"$(VERDI)" $$verdi_language_flag -f "$(FILELIST)" "$(TESTBENCH)" \
+		-top "$(TB_TOP)" $(VCS_DEFINES) -ssf "$(FSDB_FILE)" \
+		$(VERDI_FLAGS) &
 
 syntax: dirs
 	@$(IVERILOG) $(IVERILOG_FLAGS) -s ospi_slave_top -f "$(FILELIST)" \
@@ -136,8 +163,9 @@ run-ospi-open-drain:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
 		DEFINES="TB_SRDY_OPEN_DRAIN=1"
 
-# SINGLE_TRAN=1 regression: every supported width must use AxLEN=0 and
-# serialize a 32-bit OSPI word into multiple transactions on 8/16-bit buses.
+# SINGLE_TRAN=1 regression: every AXI_WIDTHS item is passed to the testbench as
+# TB_AXI_DATA_WIDTH. Every width must use AxLEN=0 and serialize a 32-bit OSPI
+# word into multiple transactions on 8/16-bit buses.
 run-width-single:
 	@for width in $(AXI_WIDTHS); do \
 		$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
@@ -167,22 +195,28 @@ help:
 	@echo "  sim      Compile and run TESTBENCH with SIMULATOR."
 	@echo "  compile  Compile TESTBENCH only."
 	@echo "  run      Run the previously compiled TESTBENCH."
-	@echo "  verdi    Open sources and fsdb/<testbench-name>.fsdb in Verdi."
+	@echo "  verdi    Open sources and the FSDB matching TESTBENCH plus DEFINES."
 	@echo "  all      Run the complete regression suite."
 	@echo "  syntax   Run an Icarus RTL syntax check."
 	@echo "  clean    Remove generated build, FSDB and log outputs."
 	@echo "  help     Show this help text."
 	@echo
 	@echo "Variables:"
-	@echo "  SIMULATOR=iverilog|vcs  Simulation tool (default: iverilog)."
+	@echo "  SIMULATOR=vcs|iverilog  Simulation tool (default: vcs)."
 	@echo "  TESTBENCH=<file.v>      Testbench source (default: tb_ospi_slave.v)."
 	@echo "  DEFINES=\"NAME=VALUE ...\" Verilog preprocessor definitions."
+	@echo "  AXI_WIDTHS=\"8 16 ...\" Width list passed as TB_AXI_DATA_WIDTH per run."
+	@echo "  RUN_NAME=<name>         Override generated testbench/parameter output name."
 	@echo "  VERDI_HOME=<path>       Verdi installation used for VCS FSDB PLI."
+	@echo "  VERDI_LANGUAGE_FLAG=auto|none|<flag>  Language option (default: auto)."
 	@echo
 	@echo "Examples:"
 	@echo "  make sim TESTBENCH=tb_async_fifo.v"
 	@echo "  make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v"
+	@echo "  make sim DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
 	@echo "  make verdi TESTBENCH=tb_ospi_slave.v"
+	@echo "  make verdi DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
+	@echo "  make verdi VERDI_LANGUAGE_FLAG=none"
 
 clean:
 	@rm -rf "$(BUILD_ROOT)" "$(FSDB_DIR)" "$(LOG_DIR)"

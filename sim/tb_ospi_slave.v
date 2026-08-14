@@ -27,6 +27,14 @@
 `define TB_LONG_BURST 0
 `endif
 
+// TB_TERMINATE_FAILURE rule: Icarus uses its non-standard exit-status task;
+// VCS and other SystemVerilog simulators use the standard $fatal system task.
+`ifdef __ICARUS__
+`define TB_TERMINATE_FAILURE $finish_and_return(1)
+`else
+`define TB_TERMINATE_FAILURE $fatal(1, "tb_ospi_slave regression failed")
+`endif
+
 module tb_ospi_slave;
 `ifdef FSDB
     initial begin
@@ -387,7 +395,7 @@ module tb_ospi_slave;
                 $display("PASS: 512-byte request split into 256-beat bursts");
             else begin
                 $display("FAIL: long burst errors=%0d", errors);
-                $finish_and_return(1);
+                `TB_TERMINATE_FAILURE;
             end
             #20 $finish;
         end else begin
@@ -469,7 +477,7 @@ module tb_ospi_slave;
         end else begin
             $display("FAIL: ospi_slave errors=%0d width=%0d",
                      errors, AXI_DATA_WIDTH);
-            $finish_and_return(1);
+            `TB_TERMINATE_FAILURE;
         end
             #20 $finish;
         end
