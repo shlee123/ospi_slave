@@ -90,6 +90,12 @@ make verdi TESTBENCH=tb_ospi_slave.v
 make help
 ```
 
+`make verdi` detects whether the installed Verdi accepts `-sv` or `-v2k`.
+If neither option is advertised by `verdi -help`, it starts Verdi without a
+language option. Override the detection with, for example,
+`VERDI_LANGUAGE_FLAG=-sv`, or disable the option explicitly with
+`VERDI_LANGUAGE_FLAG=none`.
+
 The test suite covers the RTL pad model and IE/OE/High-Z behavior, 32-entry and
 two-entry FIFO configurations, and AXI Read/Write operation at every supported
 data width in both single and burst modes. Burst regression starts an 8-byte

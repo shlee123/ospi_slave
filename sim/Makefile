@@ -32,6 +32,9 @@ LOG_FILE := $(LOG_DIR)/$(TB_TOP).log
 IVERILOG_FLAGS ?= -g2005
 VCS_FLAGS ?= -full64 -sverilog -debug_access+all -kdb
 VERDI_FLAGS ?=
+# auto probes this Verdi release; use none to omit the language option or
+# provide an explicit option (for example, -sv) for a site-specific setup.
+VERDI_LANGUAGE_FLAG ?= auto
 FSDB_PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
 FSDB_PLI ?= -P $(FSDB_PLI_DIR)/novas.tab $(FSDB_PLI_DIR)/pli.a
 
@@ -112,8 +115,23 @@ verdi: dirs check-testbench
 		echo "ERROR: FSDB not found: $(FSDB_FILE); run with SIMULATOR=vcs first." >&2; \
 		exit 2; \
 	}
-	@$(VERDI) -v2k -f "$(FILELIST)" "$(TESTBENCH)" -top "$(TB_TOP)" \
-		$(VCS_DEFINES) -ssf "$(FSDB_FILE)" $(VERDI_FLAGS) &
+	@verdi_language_flag="$(VERDI_LANGUAGE_FLAG)"; \
+	if [[ "$$verdi_language_flag" == "auto" ]]; then \
+		verdi_help="$$("$(VERDI)" -help 2>&1 || true)"; \
+		if grep -Eq -- '(^|[[:space:]])-sv([[:space:],]|$$)' <<<"$$verdi_help"; then \
+			verdi_language_flag="-sv"; \
+		elif grep -Eq -- '(^|[[:space:]])-v2k([[:space:],]|$$)' <<<"$$verdi_help"; then \
+			verdi_language_flag="-v2k"; \
+		else \
+			verdi_language_flag=""; \
+		fi; \
+	elif [[ "$$verdi_language_flag" == "none" ]]; then \
+		verdi_language_flag=""; \
+	fi; \
+	echo "INFO: Verdi language option: $${verdi_language_flag:-<none>}"; \
+	"$(VERDI)" $$verdi_language_flag -f "$(FILELIST)" "$(TESTBENCH)" \
+		-top "$(TB_TOP)" $(VCS_DEFINES) -ssf "$(FSDB_FILE)" \
+		$(VERDI_FLAGS) &
 
 syntax: dirs
 	@$(IVERILOG) $(IVERILOG_FLAGS) -s ospi_slave_top -f "$(FILELIST)" \
@@ -178,11 +196,13 @@ help:
 	@echo "  TESTBENCH=<file.v>      Testbench source (default: tb_ospi_slave.v)."
 	@echo "  DEFINES=\"NAME=VALUE ...\" Verilog preprocessor definitions."
 	@echo "  VERDI_HOME=<path>       Verdi installation used for VCS FSDB PLI."
+	@echo "  VERDI_LANGUAGE_FLAG=auto|none|<flag>  Language option (default: auto)."
 	@echo
 	@echo "Examples:"
 	@echo "  make sim TESTBENCH=tb_async_fifo.v"
 	@echo "  make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v"
 	@echo "  make verdi TESTBENCH=tb_ospi_slave.v"
+	@echo "  make verdi VERDI_LANGUAGE_FLAG=none"
 
 clean:
 	@rm -rf "$(BUILD_ROOT)" "$(FSDB_DIR)" "$(LOG_DIR)"
