@@ -13,6 +13,7 @@ ICCM/DCCM data through an AXI4 master interface in the `clk` domain.
   protocol engine, CDC FIFOs and AXI4 master; it has no `inout` ports or
   High-Z assignments.
 - `rtl/async_fifo.v`: function-free Gray-pointer asynchronous FIFO.
+- `model/ospi_master.v`: simulation-only APB4-to-OSPI behavioral master.
 
 `ospi_slave_top` instantiates `io_top` and the pure-digital `ospi_slave` core.
 During ASIC integration, `io_top` can be replaced with technology-specific IO
@@ -87,6 +88,7 @@ another. The output directories are created automatically.
 
 ```sh
 make sim TESTBENCH=tb_async_fifo.v
+make run-apb-ospi SIMULATOR=iverilog
 make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v
 make sim DEFINES="TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0"
 make verdi TESTBENCH=tb_ospi_slave.v
@@ -104,6 +106,12 @@ If neither option is advertised by `verdi -help`, it starts Verdi without a
 language option. Override the detection with, for example,
 `VERDI_LANGUAGE_FLAG=-sv`, or disable the option explicitly with
 `VERDI_LANGUAGE_FLAG=none`.
+
+The APB/OSPI end-to-end test instantiates `ospi_master`, `ospi_slave_top` and
+an AXI memory target. It verifies APB word Write and Read forwarding, PPROT
+acceptance, rejection of unaligned and partial writes, and SRDY timeout error
+handling. The normal Makefile naming rules produce `fsdb/tb_apb_ospi.fsdb` and
+`log/tb_apb_ospi.log` for this testbench.
 
 The test suite covers the RTL pad model and IE/OE/High-Z behavior, 32-entry and
 two-entry FIFO configurations, and AXI Read/Write operation at every supported

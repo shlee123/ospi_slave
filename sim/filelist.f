@@ -2,3 +2,4 @@
 ../rtl/io_top.v
 ../rtl/ospi_slave.v
 ../rtl/ospi_slave_top.v
+../model/ospi_master.v

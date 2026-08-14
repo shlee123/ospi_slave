@@ -52,9 +52,10 @@ VCS_DEFINES := $(addprefix +define+,$(DEFINES))
 
 .PHONY: all sim compile run verdi help dirs check-testbench check-tools \
 	run-io run-ospi-single run-ospi-burst run-ospi-open-drain \
-	run-width-single run-width-burst-4k run-max-burst run-fifo syntax clean
+	run-width-single run-width-burst-4k run-max-burst run-fifo \
+	run-apb-ospi syntax clean
 
-all: run-fifo run-io run-ospi-single run-ospi-burst run-ospi-open-drain \
+all: run-fifo run-io run-apb-ospi run-ospi-single run-ospi-burst run-ospi-open-drain \
 	run-width-single run-width-burst-4k run-max-burst
 
 # The requested output directories are checked and created before simulation.
@@ -152,6 +153,9 @@ run-io:
 run-fifo:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_async_fifo.v
 
+run-apb-ospi:
+	@$(MAKE) --no-print-directory sim TESTBENCH=tb_apb_ospi.v
+
 run-ospi-single:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v
 
@@ -197,6 +201,7 @@ help:
 	@echo "  run      Run the previously compiled TESTBENCH."
 	@echo "  verdi    Open sources and the FSDB matching TESTBENCH plus DEFINES."
 	@echo "  all      Run the complete regression suite."
+	@echo "  run-apb-ospi  Run APB-to-OSPI-to-AXI end-to-end verification."
 	@echo "  syntax   Run an Icarus RTL syntax check."
 	@echo "  clean    Remove generated build, FSDB and log outputs."
 	@echo "  help     Show this help text."
@@ -212,6 +217,7 @@ help:
 	@echo
 	@echo "Examples:"
 	@echo "  make sim TESTBENCH=tb_async_fifo.v"
+	@echo "  make run-apb-ospi SIMULATOR=iverilog"
 	@echo "  make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v"
 	@echo "  make sim DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
 	@echo "  make verdi TESTBENCH=tb_ospi_slave.v"
