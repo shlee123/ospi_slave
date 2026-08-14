@@ -74,10 +74,11 @@ internal Write-data FIFO and AXI backpressure propagates to `SRDY` if it fills.
 
 ```sh
 cd sim
-make clean all
+make clean all SIMULATOR=iverilog
 ```
 
-The simulation Makefile selects Icarus Verilog or VCS through `SIMULATOR` and
+The simulation Makefile defaults to VCS and selects VCS or Icarus Verilog
+through `SIMULATOR`. It
 selects the testbench through `TESTBENCH`. VCS simulations generate
 `fsdb/<testbench-name>.fsdb`; all simulations write
 `log/<testbench-name>.log`. The output directories are created automatically.

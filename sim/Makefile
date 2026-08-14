@@ -1,8 +1,8 @@
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -ec
 
-# SIMULATOR options: iverilog (default) or vcs.
-SIMULATOR ?= iverilog
+# SIMULATOR options: vcs (default) or iverilog.
+SIMULATOR ?= vcs
 # TESTBENCH rule: Verilog testbench source relative to sim/ (or an absolute path).
 TESTBENCH ?= tb_ospi_slave.v
 # DEFINES rule: space-separated preprocessor definitions, for example
@@ -30,7 +30,7 @@ LOG_FILE := $(LOG_DIR)/$(TB_TOP).log
 
 # Tool option variables may be extended or overridden by the local environment.
 IVERILOG_FLAGS ?= -g2005
-VCS_FLAGS ?= -full64 -v2005 -debug_access+all -kdb
+VCS_FLAGS ?= -full64 -sverilog -debug_access+all -kdb
 VERDI_FLAGS ?=
 FSDB_PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
 FSDB_PLI ?= -P $(FSDB_PLI_DIR)/novas.tab $(FSDB_PLI_DIR)/pli.a
@@ -174,7 +174,7 @@ help:
 	@echo "  help     Show this help text."
 	@echo
 	@echo "Variables:"
-	@echo "  SIMULATOR=iverilog|vcs  Simulation tool (default: iverilog)."
+	@echo "  SIMULATOR=vcs|iverilog  Simulation tool (default: vcs)."
 	@echo "  TESTBENCH=<file.v>      Testbench source (default: tb_ospi_slave.v)."
 	@echo "  DEFINES=\"NAME=VALUE ...\" Verilog preprocessor definitions."
 	@echo "  VERDI_HOME=<path>       Verdi installation used for VCS FSDB PLI."

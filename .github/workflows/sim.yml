@@ -28,4 +28,4 @@ jobs:
 
       - name: Run async FIFO smoke test
         working-directory: sim
-        run: make clean all
+        run: make clean all SIMULATOR=iverilog
