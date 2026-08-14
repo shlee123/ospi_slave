@@ -1,6 +1,14 @@
 `timescale 1ns/1ps
 
 module tb_async_fifo;
+`ifdef FSDB
+    initial begin
+        $fsdbDumpfile(`FSDB_FILE);
+        $fsdbDumpvars(0, tb_async_fifo);
+        $fsdbDumpMDA();
+    end
+`endif
+
     localparam integer DATA_WIDTH = 8;
     localparam integer FIFO_DEPTH = 32;
 

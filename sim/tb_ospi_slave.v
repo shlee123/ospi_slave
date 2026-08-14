@@ -28,6 +28,14 @@
 `endif
 
 module tb_ospi_slave;
+`ifdef FSDB
+    initial begin
+        $fsdbDumpfile(`FSDB_FILE);
+        $fsdbDumpvars(0, tb_ospi_slave);
+        $fsdbDumpMDA();
+    end
+`endif
+
     localparam integer AXI_ADDR_WIDTH = 32;
     localparam integer AXI_DATA_WIDTH = `TB_AXI_DATA_WIDTH;
     localparam integer AXI_ID_WIDTH = 6;

@@ -2,6 +2,9 @@
 simv
 simv.daidir/
 csrc/
+sim/build/
+sim/fsdb/
+sim/log/
 *.vcd
 *.fsdb
 *.fst
