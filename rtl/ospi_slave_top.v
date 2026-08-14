@@ -3,15 +3,25 @@
 // Compatibility top level. OSPI pads are isolated in io_top while all
 // protocol, CDC FIFO and AXI logic resides in the pure-digital core.
 module ospi_slave_top #(
+    // Rule: fixed at 32 to match the OSPI effective-address width.
     parameter integer AXI_ADDR_WIDTH = 32,
+    // Options: 8, 16, 32, 64, 128, 256, 512 or 1024 bits.
     parameter integer AXI_DATA_WIDTH = 32,
+    // Rule: AXI ID width must be at least 1; default is 6 bits.
     parameter integer AXI_ID_WIDTH = 6,
+    // Option: constant ID driven on all AXI transactions; default zero.
     parameter [AXI_ID_WIDTH-1:0] AXI_ID = {AXI_ID_WIDTH{1'b0}},
+    // Option: AxPROT value; default 3'b001.
     parameter [2:0] AXI_PROT = 3'b001,
+    // Rule: Write/Read data FIFO depth, power of two and at least 2.
     parameter integer FIFO_DEPTH = 32,
+    // Rule: must equal log2(FIFO_DEPTH).
     parameter integer FIFO_ADDR_WIDTH = 5,
+    // Rule: Request FIFO depth, power of two and at least 2.
     parameter integer REQ_FIFO_DEPTH = 2,
+    // Rule: must equal log2(REQ_FIFO_DEPTH).
     parameter integer REQ_ADDR_WIDTH = 1,
+    // Options: 0 = push-pull SRDY, 1 = open-drain SRDY.
     parameter integer SRDY_OPEN_DRAIN = 0
 ) (
     input  wire clk,

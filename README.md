@@ -41,21 +41,30 @@ The top level no longer exposes Request, Write-data or Read-data FIFO pins.
 
 - Clock: `clk`
 - Address width: 32 bits
-- Data width: parameter `AXI_DATA_WIDTH`, default 32 bits
+- Data width: parameter `AXI_DATA_WIDTH`, default 32 bits; valid values are
+  8, 16, 32, 64, 128, 256, 512 and 1024
 - ID width: parameter `AXI_ID_WIDTH`, default 6 bits
 - ID value: parameter `AXI_ID`, default zero
 - Protection: parameter `AXI_PROT`, default `3'b001`
 - Burst type: INCR
-- Transfer size: 32-bit narrow AXI beats, matching the OSPI protocol word
+- Transfer size: full-width beats for 8/16-bit AXI; 32-bit narrow beats for
+  AXI widths of 32 bits or more
 
-`AXI_DATA_WIDTH` must be a power-of-two multiple of 32. On an AXI bus wider
-than 32 bits, address bits select the proper `WDATA`, `WSTRB` and `RDATA` byte
-lanes.
+`AXI_DATA_WIDTH` must be a power of two from 8 through 1024. An OSPI word is
+split into four AXI beats on an 8-bit bus and two beats on a 16-bit bus. On an
+AXI bus of 32 bits or more, each OSPI word uses one 32-bit narrow beat and the
+address selects the proper `WDATA`, `WSTRB` and `RDATA` byte lanes.
 
-`SINGLE_TRAN` defaults to 1, so each OSPI 32-bit word is issued as a separate
-AXI transaction with `AWLEN/ARLEN=0`. Define `SINGLE_TRAN=0` to issue all words
-in an OSPI request as one AXI INCR burst. OSPI lengths from 4 through 512 bytes
-map to 1 through 128 AXI beats.
+`SINGLE_TRAN` options are:
+
+- `1` (default): every AXI beat is a separate transaction with
+  `AWLEN/ARLEN=0`.
+- `0`: combine beats into AXI INCR bursts. Each burst is limited to 256 beats
+  and is split before a 4KB address boundary. One OSPI request may therefore
+  generate multiple AXI transactions.
+
+OSPI lengths remain 4 through 512 bytes. Depending on `AXI_DATA_WIDTH`, this
+maps to 1 through 512 AXI beats.
 
 AXI read data is buffered in the internal Read-data FIFO. If AXI data is not
 available, the OSPI slave holds `SRDY` low. OSPI write data is buffered in the
@@ -69,9 +78,11 @@ make clean all
 ```
 
 The test suite covers the RTL pad model and IE/OE/High-Z behavior, 32-entry and
-two-entry FIFO configurations, AXI single transactions, AXI bursts, OSPI
-Write-to-AXI memory, AXI-memory-to-OSPI Read, byte ordering, address use and
-AXI attributes.
+two-entry FIFO configurations, and AXI Read/Write operation at every supported
+data width in both single and burst modes. Burst regression starts an 8-byte
+request at address `0x00000FFC`, checks that Write and Read are split into two
+transactions, and rejects any `AW` or `AR` request that crosses a 4KB boundary.
+It also checks byte ordering, lane strobes, transfer size, burst type and PROT.
 
 All synthesizable RTL is Verilog-2005 and contains no `function` or
 `always_ff` constructs.
