@@ -33,6 +33,7 @@ jobs:
       - name: Check parameterized output names
         working-directory: sim
         run: |
+          test -f log/tb_apb_ospi.log
           test -f log/tb_ospi_slave__TB_AXI_DATA_WIDTH-8.log
           test -f log/tb_ospi_slave__SINGLE_TRAN-0__TB_4K_BOUNDARY-1__TB_AXI_DATA_WIDTH-8__TB_TEST_ADDRESS-4092.log
           test -x build/iverilog/tb_ospi_slave__TB_AXI_DATA_WIDTH-1024/simv
