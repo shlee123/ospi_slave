@@ -9,6 +9,11 @@ TESTBENCH ?= tb_ospi_slave.v
 # DEFINES="SINGLE_TRAN=0 TB_AXI_DATA_WIDTH=64".
 DEFINES ?=
 
+# Debug rule:
+#   1 = terminate the testbench immediately on the first reported regression error.
+#   0 = accumulate regression errors and terminate after the test completes.
+STOP_ON_ERROR ?= 1
+
 IVERILOG ?= iverilog
 VVP ?= vvp
 VCS ?= vcs
@@ -24,11 +29,11 @@ LOG_DIR ?= log
 
 TB_TOP := $(basename $(notdir $(TESTBENCH)))
 # RUN_NAME rule: append sorted NAME-VALUE compile definitions so parameterized
-# runs keep independent executables, waveforms and logs. An explicit RUN_NAME
-# may be supplied for definitions whose values are not filename-safe.
+# runs keep independent executables, waveforms and logs.
 empty :=
 space := $(empty) $(empty)
-SORTED_DEFINES := $(sort $(strip $(DEFINES)))
+ALL_DEFINES := TB_STOP_ON_ERROR=$(STOP_ON_ERROR) $(strip $(DEFINES))
+SORTED_DEFINES := $(sort $(strip $(ALL_DEFINES)))
 DEFINE_TAG := $(subst $(space),__,$(subst =,-,$(SORTED_DEFINES)))
 RUN_NAME ?= $(TB_TOP)$(if $(DEFINE_TAG),__$(DEFINE_TAG))
 
@@ -47,8 +52,8 @@ VERDI_LANGUAGE_FLAG ?= auto
 FSDB_PLI_DIR ?= $(VERDI_HOME)/share/PLI/VCS/LINUX64
 FSDB_PLI ?= -P $(FSDB_PLI_DIR)/novas.tab $(FSDB_PLI_DIR)/pli.a
 
-IVERILOG_DEFINES := $(addprefix -D,$(DEFINES))
-VCS_DEFINES := $(addprefix +define+,$(DEFINES))
+IVERILOG_DEFINES := $(addprefix -D,$(ALL_DEFINES))
+VCS_DEFINES := $(addprefix +define+,$(ALL_DEFINES))
 
 .PHONY: all sim compile run verdi help dirs check-testbench check-tools \
 	run-io run-ospi-single run-ospi-burst run-ospi-open-drain \
@@ -58,7 +63,6 @@ VCS_DEFINES := $(addprefix +define+,$(DEFINES))
 all: run-fifo run-io run-apb-ospi run-ospi-single run-ospi-burst run-ospi-open-drain \
 	run-width-single run-width-burst-4k run-max-burst
 
-# The requested output directories are checked and created before simulation.
 dirs:
 	@mkdir -p "$(BUILD_DIR)" "$(FSDB_DIR)" "$(LOG_DIR)"
 
@@ -116,7 +120,6 @@ run: dirs check-testbench check-tools
 		"$(SIMV)" +fsdb+autoflush 2>&1 | tee -a "$(LOG_FILE)"; \
 	fi
 
-# Open the selected testbench source environment and its matching FSDB.
 verdi: dirs check-testbench
 	@command -v "$(VERDI)" >/dev/null || { \
 		echo "ERROR: Verdi executable not found: $(VERDI)" >&2; exit 2; \
@@ -167,17 +170,12 @@ run-ospi-open-drain:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
 		DEFINES="TB_SRDY_OPEN_DRAIN=1"
 
-# SINGLE_TRAN=1 regression: every AXI_WIDTHS item is passed to the testbench as
-# TB_AXI_DATA_WIDTH. Every width must use AxLEN=0 and serialize a 32-bit OSPI
-# word into multiple transactions on 8/16-bit buses.
 run-width-single:
 	@for width in $(AXI_WIDTHS); do \
 		$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
 			DEFINES="TB_AXI_DATA_WIDTH=$$width"; \
 	done
 
-# SINGLE_TRAN=0 regression: start the 8-byte request at 0xFFC. The testbench
-# requires both Write and Read to split at the 4KB boundary for every width.
 run-width-burst-4k:
 	@for width in $(AXI_WIDTHS); do \
 		$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
@@ -185,8 +183,6 @@ run-width-burst-4k:
 			TB_TEST_ADDRESS=4092 TB_4K_BOUNDARY=1"; \
 	done
 
-# Maximum burst regression: 512 bytes on AXI_DATA_WIDTH=8 creates 512 beats,
-# which must be split into two transactions with 256 beats each.
 run-max-burst:
 	@$(MAKE) --no-print-directory sim TESTBENCH=tb_ospi_slave.v \
 		DEFINES="SINGLE_TRAN=0 TB_AXI_DATA_WIDTH=8 \
@@ -201,7 +197,7 @@ help:
 	@echo "  run      Run the previously compiled TESTBENCH."
 	@echo "  verdi    Open sources and the FSDB matching TESTBENCH plus DEFINES."
 	@echo "  all      Run the complete regression suite."
-	@echo "  run-apb-ospi  Run APB-to-OSPI-to-AXI end-to-end verification."
+	@echo "  run-apb-ospi  Run Program/Direct APB-to-OSPI-to-AXI verification."
 	@echo "  syntax   Run an Icarus RTL syntax check."
 	@echo "  clean    Remove generated build, FSDB and log outputs."
 	@echo "  help     Show this help text."
@@ -209,6 +205,7 @@ help:
 	@echo "Variables:"
 	@echo "  SIMULATOR=vcs|iverilog  Simulation tool (default: vcs)."
 	@echo "  TESTBENCH=<file.v>      Testbench source (default: tb_ospi_slave.v)."
+	@echo "  STOP_ON_ERROR=1|0       1=finish immediately, 0=accumulate errors (default: 1)."
 	@echo "  DEFINES=\"NAME=VALUE ...\" Verilog preprocessor definitions."
 	@echo "  AXI_WIDTHS=\"8 16 ...\" Width list passed as TB_AXI_DATA_WIDTH per run."
 	@echo "  RUN_NAME=<name>         Override generated testbench/parameter output name."
@@ -216,13 +213,11 @@ help:
 	@echo "  VERDI_LANGUAGE_FLAG=auto|none|<flag>  Language option (default: auto)."
 	@echo
 	@echo "Examples:"
-	@echo "  make sim TESTBENCH=tb_async_fifo.v"
 	@echo "  make run-apb-ospi SIMULATOR=iverilog"
-	@echo "  make sim SIMULATOR=vcs TESTBENCH=tb_ospi_slave.v"
+	@echo "  make run-apb-ospi SIMULATOR=vcs STOP_ON_ERROR=0"
+	@echo "  make sim TESTBENCH=tb_async_fifo.v"
 	@echo "  make sim DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
-	@echo "  make verdi TESTBENCH=tb_ospi_slave.v"
-	@echo "  make verdi DEFINES=\"TB_AXI_DATA_WIDTH=64 SINGLE_TRAN=0\""
-	@echo "  make verdi VERDI_LANGUAGE_FLAG=none"
+	@echo "  make verdi TESTBENCH=tb_apb_ospi.v"
 
 clean:
 	@rm -rf "$(BUILD_ROOT)" "$(FSDB_DIR)" "$(LOG_DIR)"
