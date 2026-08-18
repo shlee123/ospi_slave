@@ -94,6 +94,24 @@ module tb_apb_ospi;
     wire [3:0]  map_CSN;
     tri  [7:0]  map_D;
 
+    // Dedicated short-timeout master used only for TX-full / RX-empty APB
+    // wait-state verification. Keeping this separate from map_master prevents
+    // the functional CSN-mapping test from timing out before 9 OSPI bytes
+    // can be serialized.
+    reg  [31:0] fifo_PADDR;
+    reg         fifo_PSEL;
+    reg         fifo_PENABLE;
+    reg         fifo_PWRITE;
+    reg  [31:0] fifo_PWDATA;
+    reg  [3:0]  fifo_PSTRB;
+    reg  [2:0]  fifo_PPROT;
+    wire [31:0] fifo_PRDATA;
+    wire        fifo_PREADY;
+    wire        fifo_PSLVERR;
+    wire        fifo_SCLK;
+    wire [3:0]  fifo_CSN;
+    tri  [7:0]  fifo_D;
+
     // Timeout-only master. SRDY is forced low.
     reg  [31:0] timeout_PADDR;
     reg         timeout_PSEL;
@@ -207,9 +225,11 @@ module tb_apb_ospi;
     );
 
     // No real slave is needed here because only Direct Writes are used.
-    // APB_TIMEOUT_CYCLES is shortened to exercise FIFO wait timeout quickly.
+    // Keep a generous APB timeout: one Direct Write serializes 9 OSPI bytes
+    // (Cmd + 4-byte address + 4-byte data), so this instance must not use
+    // the intentionally-short FIFO timeout setting.
     ospi_master #(
-        .APB_TIMEOUT_CYCLES(8),
+        .APB_TIMEOUT_CYCLES(64),
         .OSPI_TIMEOUT_CYCLES(64)
     ) map_master (
         .PCLK(PCLK),
@@ -227,6 +247,29 @@ module tb_apb_ospi;
         .SCLK(map_SCLK),
         .CSN(map_CSN),
         .D(map_D),
+        .SRDY(1'b1)
+    );
+
+    // Dedicated FIFO wait-state timeout checker.
+    ospi_master #(
+        .APB_TIMEOUT_CYCLES(8),
+        .OSPI_TIMEOUT_CYCLES(64)
+    ) fifo_timeout_master (
+        .PCLK(PCLK),
+        .PRESETn(reset_n),
+        .PADDR(fifo_PADDR),
+        .PSEL(fifo_PSEL),
+        .PENABLE(fifo_PENABLE),
+        .PWRITE(fifo_PWRITE),
+        .PWDATA(fifo_PWDATA),
+        .PSTRB(fifo_PSTRB),
+        .PPROT(fifo_PPROT),
+        .PRDATA(fifo_PRDATA),
+        .PREADY(fifo_PREADY),
+        .PSLVERR(fifo_PSLVERR),
+        .SCLK(fifo_SCLK),
+        .CSN(fifo_CSN),
+        .D(fifo_D),
         .SRDY(1'b1)
     );
 
@@ -532,38 +575,72 @@ module tb_apb_ospi;
         end
     endtask
 
-    task map_fifo_write;
+    task fifo_timeout_write;
         input [31:0] data;
         output response_error;
         output integer wait_cycles;
         reg complete;
         begin
             @(negedge PCLK);
-            map_PADDR = REG_WDATA;
-            map_PWDATA = data;
-            map_PSTRB = 4'hf;
-            map_PPROT = 3'b000;
-            map_PWRITE = 1'b1;
-            map_PSEL = 1'b1;
-            map_PENABLE = 1'b0;
+            fifo_PADDR = REG_WDATA;
+            fifo_PWDATA = data;
+            fifo_PSTRB = 4'hf;
+            fifo_PPROT = 3'b000;
+            fifo_PWRITE = 1'b1;
+            fifo_PSEL = 1'b1;
+            fifo_PENABLE = 1'b0;
 
             @(negedge PCLK);
-            map_PENABLE = 1'b1;
+            fifo_PENABLE = 1'b1;
 
             complete = 1'b0;
             wait_cycles = 0;
             while (!complete) begin
                 @(posedge PCLK);
                 wait_cycles = wait_cycles + 1;
-                #1 complete = (map_PREADY === 1'b1);
+                #1 complete = (fifo_PREADY === 1'b1);
             end
 
-            response_error = map_PSLVERR;
+            response_error = fifo_PSLVERR;
 
             @(negedge PCLK);
-            map_PSEL = 1'b0;
-            map_PENABLE = 1'b0;
-            map_PWRITE = 1'b0;
+            fifo_PSEL = 1'b0;
+            fifo_PENABLE = 1'b0;
+            fifo_PWRITE = 1'b0;
+        end
+    endtask
+
+    task fifo_timeout_read;
+        output [31:0] data;
+        output response_error;
+        output integer wait_cycles;
+        reg complete;
+        begin
+            @(negedge PCLK);
+            fifo_PADDR = REG_RDATA;
+            fifo_PSTRB = 4'b0;
+            fifo_PPROT = 3'b000;
+            fifo_PWRITE = 1'b0;
+            fifo_PSEL = 1'b1;
+            fifo_PENABLE = 1'b0;
+
+            @(negedge PCLK);
+            fifo_PENABLE = 1'b1;
+
+            complete = 1'b0;
+            wait_cycles = 0;
+            while (!complete) begin
+                @(posedge PCLK);
+                wait_cycles = wait_cycles + 1;
+                #1 complete = (fifo_PREADY === 1'b1);
+            end
+
+            data = fifo_PRDATA;
+            response_error = fifo_PSLVERR;
+
+            @(negedge PCLK);
+            fifo_PSEL = 1'b0;
+            fifo_PENABLE = 1'b0;
         end
     endtask
 
@@ -691,6 +768,14 @@ module tb_apb_ospi;
         map_PWDATA = 32'b0;
         map_PSTRB = 4'b0;
         map_PPROT = 3'b0;
+
+        fifo_PADDR = 32'b0;
+        fifo_PSEL = 1'b0;
+        fifo_PENABLE = 1'b0;
+        fifo_PWRITE = 1'b0;
+        fifo_PWDATA = 32'b0;
+        fifo_PSTRB = 4'b0;
+        fifo_PPROT = 3'b0;
 
         timeout_PADDR = 32'b0;
         timeout_PSEL = 1'b0;
@@ -840,23 +925,23 @@ module tb_apb_ospi;
 
         // ------------------------------------------------------------
         // TX FIFO full / RX FIFO empty APB wait-state and timeout behavior.
-        // map_master uses APB_TIMEOUT_CYCLES=8.
+        // fifo_timeout_master intentionally uses APB_TIMEOUT_CYCLES=8.
         // ------------------------------------------------------------
         report_info("Check TX FIFO full APB wait then timeout");
         for (lane = 0; lane < 8; lane = lane + 1) begin
-            map_fifo_write(32'hA500_0000 + lane, apb_error, wait_guard);
+            fifo_timeout_write(32'hA500_0000 + lane, apb_error, wait_guard);
             if (apb_error)
                 report_error("TX FIFO push before full unexpectedly failed");
         end
 
-        map_fifo_write(32'hFFFF_FFFF, apb_error, wait_guard);
+        fifo_timeout_write(32'hFFFF_FFFF, apb_error, wait_guard);
         if (!apb_error)
             report_error("TX FIFO full did not timeout with PSLVERR");
         if (wait_guard < 8)
             report_error("TX FIFO full did not hold PREADY low for timeout");
 
         report_info("Check RX FIFO empty APB wait then timeout");
-        map_apb_read(REG_RDATA, apb_read_data, apb_error, wait_guard);
+        fifo_timeout_read(apb_read_data, apb_error, wait_guard);
         if (!apb_error)
             report_error("RX FIFO empty did not timeout with PSLVERR");
         if (wait_guard < 8)
