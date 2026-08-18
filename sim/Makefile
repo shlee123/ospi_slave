@@ -33,7 +33,7 @@ TB_TOP := $(basename $(notdir $(TESTBENCH)))
 empty :=
 space := $(empty) $(empty)
 ALL_DEFINES := TB_STOP_ON_ERROR=$(STOP_ON_ERROR) $(strip $(DEFINES))
-SORTED_DEFINES := $(sort $(strip $(ALL_DEFINES)))
+SORTED_DEFINES := $(sort $(strip $(DEFINES)))
 DEFINE_TAG := $(subst $(space),__,$(subst =,-,$(SORTED_DEFINES)))
 RUN_NAME ?= $(TB_TOP)$(if $(DEFINE_TAG),__$(DEFINE_TAG))
 
