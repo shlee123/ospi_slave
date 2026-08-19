@@ -3,7 +3,7 @@
 // End-to-end regression for the APB4-to-OSPI behavioral master model.
 //
 // Coverage:
-// - Program Mode register map at 0xB000_B000.
+// - Program Mode register map at 0x0FFF_0000.
 // - Program Mode 8x32-bit TX/RX FIFOs.
 // - Cmd register write starts the OSPI transaction.
 // - Direct Mode 0x1000_0000..0x8FFF_FFFF.
@@ -42,11 +42,11 @@ module tb_apb_ospi;
     localparam integer AXI_DATA_WIDTH = 32;
     localparam integer AXI_ID_WIDTH   = 6;
 
-    localparam [31:0] REG_CMD   = 32'hB000_B000;
-    localparam [31:0] REG_ADDR  = 32'hB000_B004;
-    localparam [31:0] REG_WDATA = 32'hB000_B008;
-    localparam [31:0] REG_RDATA = 32'hB000_B00C;
-    localparam [31:0] REG_CTRL  = 32'hB000_B010;
+    localparam [31:0] REG_CMD   = 32'h0FFF_0000;
+    localparam [31:0] REG_ADDR  = 32'h0FFF_0004;
+    localparam [31:0] REG_WDATA = 32'h0FFF_0008;
+    localparam [31:0] REG_RDATA = 32'h0FFF_000C;
+    localparam [31:0] REG_CTRL  = 32'h0FFF_0010;
 
     localparam [31:0] DIRECT0_BASE = 32'h1000_0000;
     localparam [31:0] DIRECT1_BASE = 32'h3000_0000;
