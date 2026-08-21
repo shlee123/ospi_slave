@@ -1,0 +1,57 @@
+name: Update OSPI Program Register Base Once
+
+on:
+  push:
+    branches:
+      - update-ospi-program-base-f000
+
+permissions:
+  contents: write
+
+jobs:
+  patch-register-base:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: update-ospi-program-base-f000
+
+      - name: Patch Program Mode register base
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = [Path('model/ospi_master.v'), Path('sim/tb_apb_ospi.v')]
+          replacements = {
+              '0x0FFF_0000': '0x0FFF_F000',
+              '0x0FFF_0004': '0x0FFF_F004',
+              '0x0FFF_0008': '0x0FFF_F008',
+              '0x0FFF_000C': '0x0FFF_F00C',
+              '0x0FFF_0010': '0x0FFF_F010',
+              "32'h0FFF_0000": "32'h0FFF_F000",
+              "32'h0FFF_0004": "32'h0FFF_F004",
+              "32'h0FFF_0008": "32'h0FFF_F008",
+              "32'h0FFF_000C": "32'h0FFF_F00C",
+              "32'h0FFF_0010": "32'h0FFF_F010",
+          }
+          for path in files:
+              text = path.read_text()
+              original = text
+              for old, new in replacements.items():
+                  text = text.replace(old, new)
+              if text == original:
+                  raise SystemExit(f'No register-base changes made in {path}')
+              if '0FFF_000' in text:
+                  raise SystemExit(f'Old Program Mode address remains in {path}')
+              path.write_text(text)
+          PY
+
+      - name: Remove one-shot workflow and commit patch
+        run: |
+          rm .github/workflows/update-regmap-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add model/ospi_master.v sim/tb_apb_ospi.v .github/workflows/update-regmap-once.yml
+          git commit -m "Update OSPI Program Mode base to 0x0FFF_F000"
+          git push origin HEAD:update-ospi-program-base-f000
