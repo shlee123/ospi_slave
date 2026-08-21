@@ -2,15 +2,15 @@
 
 // Simulation-only APB4-to-OSPI master behavioral model.
 //
-// APB register map (Program Mode base = 0x0FFF_0000):
-//   0x0FFF_0000 Cmd   [7:4] CmdType (1 = ICCM/DCCM access)
+// APB register map (Program Mode base = 0x0FFF_F000):
+//   0x0FFF_F000 Cmd   [7:4] CmdType (1 = ICCM/DCCM access)
 //                     [3]   Read/Write (0 = Read, 1 = Write)
 //                     [2:0] CmdLength (4 << CmdLength bytes; 4..512 bytes)
 //                     Writing this register starts one Program Mode transfer.
-//   0x0FFF_0004 Addr  OSPI start address
-//   0x0FFF_0008 Wdata APB write pushes one 32-bit item into 8-item TX FIFO
-//   0x0FFF_000C Rdata APB read pops one 32-bit item from 8-item RX FIFO
-//   0x0FFF_0010 Ctrl  [31] ospi_enable
+//   0x0FFF_F004 Addr  OSPI start address
+//   0x0FFF_F008 Wdata APB write pushes one 32-bit item into 8-item TX FIFO
+//   0x0FFF_F00C Rdata APB read pops one 32-bit item from 8-item RX FIFO
+//   0x0FFF_F010 Ctrl  [31] ospi_enable
 //                     [30] ospi_idle (RO)
 //                     [29] rx_rd_valid (RO)
 //                     [28] tx_wr_ready (RO)
@@ -70,11 +70,11 @@ module ospi_master #(
     input  wire        SRDY
 );
 
-    localparam [31:0] REG_CMD   = 32'h0FFF_0000;
-    localparam [31:0] REG_ADDR  = 32'h0FFF_0004;
-    localparam [31:0] REG_WDATA = 32'h0FFF_0008;
-    localparam [31:0] REG_RDATA = 32'h0FFF_000C;
-    localparam [31:0] REG_CTRL  = 32'h0FFF_0010;
+    localparam [31:0] REG_CMD   = 32'h0FFF_F000;
+    localparam [31:0] REG_ADDR  = 32'h0FFF_F004;
+    localparam [31:0] REG_WDATA = 32'h0FFF_F008;
+    localparam [31:0] REG_RDATA = 32'h0FFF_F00C;
+    localparam [31:0] REG_CTRL  = 32'h0FFF_F010;
 
     localparam [31:0] DIRECT_START = 32'h1000_0000;
     localparam [31:0] DIRECT_END   = 32'h8FFF_FFFF;
